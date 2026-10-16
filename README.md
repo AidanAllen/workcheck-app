@@ -63,6 +63,12 @@ cd mobile/android
 
 ## 云端构建（推荐）
 
+> **首次启用要在 GitHub 网页上做一次**：把 `docs/ci/android-release.yml` 原样放进
+> `.github/workflows/android-release.yml` 即可（Add file → Create new file，
+> 路径框里直接填全路径，内容粘贴进去）。
+> 原因是本仓库最初是用一个缺 `workflow` 权限的令牌推的，
+> GitHub 会拒绝「通过 git 创建 `.github/workflows/*`」，网页创建则不受此限。
+
 push 一个 `v*` 类型的 tag 到**本仓库**，`.github/workflows/android-release.yml`
 会自动构建，APK 挂在 Actions 产物里直接下载。
 
