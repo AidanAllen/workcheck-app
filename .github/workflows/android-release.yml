@@ -27,14 +27,20 @@ jobs:
           distribution: temurin
           java-version: '21'          # 必须是 21：Capacitor 7 的 capacitor-android 用 Java 21 编译（JDK 17 会报"无效的源发行版: 21"）
 
-      - uses: android-actions/setup-android@v3
-
-      # AGP 会按需自动下载 SDK 组件，前提是许可已接受；这里显式接受并预装，
-      # 避免首次构建卡在许可确认上。装不上也不致命（AGP 会自己补），所以不阻断。
-      - name: 接受 SDK 许可并预装组件
+      # 不用 android-actions/setup-android：它默认要装 "tools" 包，该包在新版 SDK 里
+      # 已移除，sdkmanager 会报 "Failed to find package 'tools'" 并以退出码 1 失败。
+      # runner 镜像本身预装了 Android SDK，这里只补许可与缺失组件。
+      - name: 接受 SDK 许可并补齐组件
         run: |
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0" > /dev/null 2>&1 || true
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_HOME=$SDK"
+          SM="$(command -v sdkmanager || true)"
+          [ -x "$SM" ] || SM="$(ls -d "$SDK"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1)"
+          echo "sdkmanager=$SM"
+          yes | "$SM" --licenses > /dev/null 2>&1 || true
+          # 装不全也不致命：AGP 在许可已接受的前提下会按需自动下载
+          "$SM" --install "platform-tools" "platforms;android-35" "build-tools;35.0.0" \
+            > /dev/null 2>&1 || echo "::warning::SDK 组件预装未完全成功，交由 AGP 按需自动下载"
 
       - uses: actions/setup-node@v4
         with:
