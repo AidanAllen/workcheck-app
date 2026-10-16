@@ -1,7 +1,8 @@
 # WorkCheck 安卓壳工程（App 名：看板娘）
 
 把线上站点 <https://workcheck.byeallen.com/> 封装成安卓 App。
-**网页端代码不在本分支** —— 它在 `main` 分支，两边各自独立演进，不需要互相同步。
+**网页端代码在另一个仓库** —— <https://github.com/AidanAllen/workcheck>。
+两边各自独立演进，不需要互相同步。
 
 App 本身不含任何业务页面：只有一个原生 WebView，内容全部实时从线上站点加载。
 所以改网页不需要重新发 App 版本，服务器重启后所有已安装的 App 立刻看到新版本。
@@ -62,7 +63,7 @@ cd mobile/android
 
 ## 云端构建（推荐）
 
-push 一个 `v*` 类型的 tag 到**本分支**，`.github/workflows/android-release.yml`
+push 一个 `v*` 类型的 tag 到**本仓库**，`.github/workflows/android-release.yml`
 会自动构建，APK 挂在 Actions 产物里直接下载。
 
 配了 `KEYSTORE_B64` / `KEYSTORE_PASSWORD` / `KEY_ALIAS` / `KEY_PASSWORD`

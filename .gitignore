@@ -1,4 +1,15 @@
-# 安卓分支专用忽略规则（网页端代码在 main 分支，本分支不含 server/ public/）
+# ⚠️ 网页端运行期数据：含平台明文凭证与 SQLite 库，绝不能进版本库。
+# 本仓库不该出现 data/ —— 它属于网页端仓库 workcheck，那边由它自己的 .gitignore 排除。
+# 踩过的坑：切到本分支时 .gitignore 跟着换成了不含 data/ 的这一份，
+# data/ 立刻变成「未忽略的未跟踪文件」，一次 git add -A 就被整体带进来了。
+data/
+data.bak-*/
+data.bak*/
+*.db
+*.db-shm
+*.db-wal
+
+# 安卓壳专用忽略规则（网页端代码在另一个仓库 workcheck，本仓库不含 server/ public/）
 
 # 构建产物：要装就重新构建，别把包体放进版本库
 *.apk
@@ -19,7 +30,7 @@ mobile/android/.gradle/
 mobile/android/local.properties
 local.properties
 
-# 给 main 分支用的网页改动补丁，不属于本分支
+# 给网页端仓库用的改动补丁，不属于本仓库
 *.patch
 
 # 本地会话与工作记录
