@@ -17,8 +17,12 @@ data.bak*/
 *.aab.idsig
 
 # 签名密钥与口令：一旦入库，别人就能冒名签出「官方升级包」
+# 踩过的坑：回滚时这两行总被一起退掉，workcheck.p12 立刻变成未忽略的未跟踪文件，
+# 任何 git add -A 都会把密钥带进公开仓库。改 .gitignore 前先确认这两行还在。
 *.jks
 *.keystore
+*.p12
+*.pem
 keystore.properties
 
 # Gradle / Capacitor 生成的中间产物
