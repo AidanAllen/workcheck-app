@@ -2,7 +2,7 @@ package com.byeallen.workcheck;
 
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
-import android.content.res.Configuration;
+import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
@@ -11,13 +11,13 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
 import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.widget.Toast;
 
-import androidx.annotation.NonNull;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 
@@ -26,22 +26,23 @@ import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.BridgeWebViewClient;
 
 /**
- * App 只有一个 WebView，内容全部来自线上站点。这里只做三件事：
- *   1. 把 WebView 调教成「能跑后台管理系统」的样子（Cookie、localStorage、不反色）
- *   2. 守住导航边界：主站和飞书授权留在壳内，其它一律交系统浏览器
- *   3. 补上手机该有的手感：返回键、加载失败兜底页、状态栏配色
+ * App 只有一个 WebView，内容全部来自「使用者自己填的站点」。这里做四件事：
+ *   1. 站点地址不写死：首次启动先落在本地配置页，填完存起来，之后直接打开
+ *   2. 把 WebView 调教成「能跑后台管理系统」的样子（Cookie、localStorage、不反色）
+ *   3. 守住导航边界：自己的站点和飞书授权留在壳内，其它一律交系统浏览器
+ *   4. 补上手机该有的手感：返回键、加载失败兜底页、状态栏配色
  */
 public class MainActivity extends BridgeActivity {
 
-    /** 允许在 App 内直接打开的域名。
-        飞书那两个域必须放行：授权页一旦被甩到外部浏览器，回调就再也回不到 App 里。 */
-    private static final String[] IN_APP_HOSTS = {
-        "workcheck.byeallen.com",
+    private static final String PREFS = "workcheck";
+    private static final String PREF_SITE = "siteUrl";
+
+    /** 无论用户填的是什么站点，这几个域都放行。
+        飞书那两个必须放行：授权页一旦被甩到外部浏览器，回调就再也回不到 App 里。 */
+    private static final String[] FIXED_IN_APP_HOSTS = {
         "feishu.cn",
         "larksuite.com"
     };
-
-    private static final String HOME = "https://workcheck.byeallen.com/";
 
     private static final String ERROR_PAGE =
         "<!DOCTYPE html><html lang='zh-CN'><head><meta charset='utf-8'>"
@@ -64,9 +65,13 @@ public class MainActivity extends BridgeActivity {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private boolean backPressedOnce = false;
 
+    /** 已保存的站点地址，结尾带 /。空串 = 还没配置过。 */
+    private String siteUrl = "";
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        siteUrl = getSharedPreferences(PREFS, MODE_PRIVATE).getString(PREF_SITE, "");
         // 页面是深色玻璃，状态栏图标用浅色才看得见（edge-to-edge 下 Android 15 靠这个控制）
         WindowInsetsControllerCompat insets =
             WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
@@ -74,45 +79,11 @@ public class MainActivity extends BridgeActivity {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
             getWindow().setStatusBarColor(Color.parseColor("#1d1519"));
         }
-        // true = 让系统照常给内容留出系统栏空间，别把 WebView 铺到状态栏底下。
-        // targetSdk 35 起 Android 15 会默认强制 edge-to-edge，不声明就是内容被状态栏压住。
-        WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
+        // 只调状态栏配色，系统栏间距交给 CapacitorWebView 自带的 edge-to-edge 处理
+        // （配置里的 android.adjustMarginsForEdgeToEdge = force）。
+        // 这里千万别碰 WindowCompat.setDecorFitsSystemWindows：它在 Android 15 上已失效，
+        // 却会把 WindowInsets 提前消耗掉，导致 Capacitor 读到的 top inset 变成 0。
         tuneWebView();
-        applyStatusBarPadding();
-    }
-
-    /**
-     * 把 WebView 的内容压到状态栏下面。
-     *
-     * 为什么不指望网页里的 env(safe-area-inset-top)：那套 CSS 在华为 / 鸿蒙的 WebView 上
-     * 经常量出来是 0，撑不开。这里改用原生测量——先看 WebView 实际落在屏幕的哪个 y 位置，
-     * 跟状态栏高度比一比，缺多少补多少。这样系统自己留了空间时（某些 ROM）不会重复加，
-     * 系统没留时能补齐。
-     */
-    private void applyStatusBarPadding() {
-        Bridge bridge = getBridge();
-        WebView webView = bridge != null ? bridge.getWebView() : null;
-        if (webView == null) return;
-        // 布局没走完时拿到的位置是 0，post 到下一帧再量
-        webView.post(() -> {
-            int bar = getStatusBarHeight();
-            if (bar <= 0) return;
-            int[] loc = new int[2];
-            webView.getLocationOnScreen(loc);
-            webView.setPadding(0, Math.max(0, bar - loc[1]), 0, 0);
-        });
-    }
-
-    private int getStatusBarHeight() {
-        int resId = getResources().getIdentifier("status_bar_height", "dimen", "android");
-        return resId > 0 ? getResources().getDimensionPixelSize(resId) : 0;
-    }
-
-    /** 转屏、折叠展开、进分屏之后状态栏高度会变，重新量一次 */
-    @Override
-    public void onConfigurationChanged(@NonNull Configuration newConfig) {
-        super.onConfigurationChanged(newConfig);
-        applyStatusBarPadding();
     }
 
     private void tuneWebView() {
@@ -149,6 +120,9 @@ public class MainActivity extends BridgeActivity {
         cm.setAcceptCookie(true);
         cm.setAcceptThirdPartyCookies(webView, false);   // 只信自家域的 Cookie
 
+        // 本地配置页靠这个拿到 / 保存站点地址
+        webView.addJavascriptInterface(new SiteBridge(), "WorkCheckNative");
+
         webView.setWebViewClient(new AppWebViewClient(bridge));
     }
 
@@ -170,15 +144,33 @@ public class MainActivity extends BridgeActivity {
         mainHandler.postDelayed(() -> backPressedOnce = false, 2000);
     }
 
-    private static boolean isInApp(Uri uri) {
+    /** 本地配置页（www/index.html）是哪个 URL：取决于 androidScheme，一般是 https://localhost/ */
+    private static boolean isLocalPage(Uri uri) {
+        if (uri == null) return false;
+        String host = uri.getHost();
+        return host != null && ("localhost".equals(host.toLowerCase()) || "127.0.0.1".equals(host));
+    }
+
+    private boolean isInApp(Uri uri) {
         if (uri == null) return false;
         String host = uri.getHost();
         if (host == null) return false;
         host = host.toLowerCase();
-        for (String h : IN_APP_HOSTS) {
+        String configured = hostOf(siteUrl);
+        if (configured != null && (host.equals(configured) || host.endsWith("." + configured))) {
+            return true;
+        }
+        for (String h : FIXED_IN_APP_HOSTS) {
             if (host.equals(h) || host.endsWith("." + h)) return true;
         }
         return false;
+    }
+
+    private static String hostOf(String url) {
+        if (url == null || url.isEmpty()) return null;
+        Uri u = Uri.parse(url);
+        String h = u.getHost();
+        return h == null ? null : h.toLowerCase();
     }
 
     private void openExternal(Uri uri) {
@@ -190,7 +182,76 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void showErrorPage(WebView view) {
-        mainHandler.post(() -> view.loadDataWithBaseURL(HOME, ERROR_PAGE, "text/html", "utf-8", null));
+        final String base = siteUrl.isEmpty() ? "https://localhost/" : siteUrl;
+        mainHandler.post(() -> view.loadDataWithBaseURL(base, ERROR_PAGE, "text/html", "utf-8", null));
+    }
+
+    /**
+     * 把用户填的东西整理成可用地址。
+     *
+     * @return 正常就返回 URL（结尾带 /）；不合法则返回 "ERR:<提示>"。
+     */
+    private static String normalizeSite(String input) {
+        String s = (input == null ? "" : input).trim();
+        if (s.isEmpty()) return "ERR:请填写看板站点地址";
+        if (!s.matches("(?i)^https?://.+$")) {
+            s = "https://" + s;   // 没写协议就按 https 补，省得用户手打
+        }
+        Uri u = Uri.parse(s);
+        String scheme = u.getScheme() == null ? "" : u.getScheme().toLowerCase();
+        String host = u.getHost();
+        if (host == null || host.isEmpty()) {
+            return "ERR:地址格式不对，形如 https://workcheck.byeallen.com/";
+        }
+        if (!"https".equals(scheme)) {
+            // Manifest 里 usesCleartextTraffic=false，明文就算存了也加载不了，直接挡在入口上
+            return "ERR:仅支持 HTTPS 站点（明文 http 已被系统禁止）";
+        }
+        if (!s.endsWith("/")) s = s + "/";
+        return s;
+    }
+
+    /** 给本地配置页（www/index.html）用的桥。 */
+    private final class SiteBridge {
+
+        /** @return 已保存的站点地址；没配置过返回空串 */
+        @JavascriptInterface
+        public String getSavedSite() {
+            return siteUrl;
+        }
+
+        /** @return 空串表示成功（随后由原生加载），否则返回错误提示 */
+        @JavascriptInterface
+        public String saveSite(String input) {
+            String result = normalizeSite(input);
+            if (result.startsWith("ERR:")) return result.substring(4);
+            final String url = result;
+            mainHandler.post(() -> {
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(PREF_SITE, url).apply();
+                siteUrl = url;
+                loadSite(url);
+            });
+            return "";
+        }
+
+        /** 已配置过，直接打开（跳过校验） */
+        @JavascriptInterface
+        public void openSite(String url) {
+            if (url == null || url.isEmpty()) return;
+            mainHandler.post(() -> loadSite(url));
+        }
+
+        @JavascriptInterface
+        public String appVersion() {
+            return BuildConfig.VERSION_NAME;
+        }
+    }
+
+    private void loadSite(String url) {
+        Bridge bridge = getBridge();
+        if (bridge != null) {
+            bridge.getWebView().loadUrl(url);
+        }
     }
 
     private final class AppWebViewClient extends BridgeWebViewClient {
@@ -205,7 +266,11 @@ public class MainActivity extends BridgeActivity {
             String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase();
 
             if ("https".equals(scheme)) {
-                if (isInApp(uri)) return false;      // 主站与飞书授权：留在壳内
+                if (isLocalPage(uri)) {
+                    // 本地配置页：交回 Capacitor 自己处理
+                    return super.shouldOverrideUrlLoading(view, request);
+                }
+                if (isInApp(uri)) return false;      // 自己的站点与飞书授权：留在壳内
                 openExternal(uri);                    // 别的站点：交系统浏览器，壳内不加载
                 return true;
             }

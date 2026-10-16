@@ -6,42 +6,132 @@
 <meta name="theme-color" content="#1d1519">
 <title>看板娘</title>
 <style>
-  /* 这是 App 内的首帧占位页：真实内容来自 capacitor.config.json 里的远程站点。
-     它的唯一任务是别让用户对着白屏 —— 站点首字节回来之前一直显示它。 */
+  /* 这是 App 的本地配置页：站点地址不写死在包里，由使用者第一次启动时填。
+     样式跟看板页面保持一致（深色玻璃 + 樱粉强调色），别让人觉得跳到了另一个 App。 */
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
   body {
-    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
-    background: #1d1519;
-    color: #fbe9ee;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: #1d1519; color: #fbe9ee;
     font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
     padding: calc(24px + env(safe-area-inset-top)) 24px calc(24px + env(safe-area-inset-bottom));
   }
+  .card { width: 100%; max-width: 340px; text-align: center; }
+  .card[hidden] { display: none; }
   .mark { font-size: 40px; line-height: 1; }
-  .name { font-size: 15px; letter-spacing: .04em; opacity: .9; }
+  h1 { font-size: 17px; font-weight: 600; margin: 14px 0 6px; letter-spacing: .04em; }
+  .hint { font-size: 13px; color: #9c8290; line-height: 1.7; margin: 0 0 18px; }
+  .tip { font-size: 11.5px; color: #7d6874; line-height: 1.6; margin: 14px 0 0; }
+
+  input {
+    width: 100%; padding: 13px 15px;
+    border: 1px solid rgba(255, 159, 185, .22); border-radius: 12px;
+    background: rgba(255, 255, 255, .04); color: #fbe9ee;
+    font-size: 15px; font-family: inherit;
+    -webkit-text-size-adjust: 100%;
+  }
+  input::placeholder { color: #6f5c68; }
+  input:focus { outline: none; border-color: rgba(255, 159, 185, .5); }
+
+  button.primary {
+    width: 100%; margin-top: 14px; padding: 13px;
+    border: 0; border-radius: 999px;
+    background: #ff9fb9; color: #3a1f28;
+    font-size: 15px; font-weight: 600; font-family: inherit;
+  }
+  button.primary:active { opacity: .85; }
+
+  button.link {
+    margin-top: 10px; padding: 8px 16px;
+    border: 0; background: none; color: #9c8290;
+    font-size: 12.5px; font-family: inherit; text-decoration: underline;
+  }
+
+  .err {
+    margin-top: 10px; padding: 9px 12px; border-radius: 10px;
+    background: rgba(226, 75, 74, .15); color: #f09595;
+    font-size: 12.5px; line-height: 1.5; text-align: left;
+  }
+  .err[hidden] { display: none; }
+
   .spin {
-    width: 26px; height: 26px; border-radius: 50%;
-    border: 2px solid rgba(255, 159, 185, .25);
-    border-top-color: #ff9fb9;
+    width: 26px; height: 26px; margin: 0 auto; border-radius: 50%;
+    border: 2px solid rgba(255, 159, 185, .25); border-top-color: #ff9fb9;
     animation: spin .9s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .spin { animation-duration: 2.4s; } }
-  .hint { font-size: 12px; color: #9c8290; }
+  .target { font-size: 12.5px; color: #9c8290; word-break: break-all; margin: 0 0 4px; }
 </style>
 </head>
 <body>
-  <div class="mark">📊</div>
-  <div class="name">看板娘</div>
-  <div class="spin" id="spin"></div>
-  <div class="hint" id="hint">正在连接看板…</div>
+
+  <!-- 第一次启动（或点了「切换站点」）-->
+  <div class="card" id="setup" hidden>
+    <div class="mark">📊</div>
+    <h1>看板娘</h1>
+    <p class="hint">先填入你的看板站点地址<br>之后 App 会直接打开它</p>
+    <input id="url" type="text" inputmode="url" autocomplete="off" autocapitalize="off"
+           spellcheck="false" autocorrect="off" placeholder="workcheck.byeallen.com">
+    <div class="err" id="err" hidden></div>
+    <button class="primary" id="save">保存并打开</button>
+    <p class="tip">没写 https:// 会自动补齐。仅支持 HTTPS 站点。</p>
+  </div>
+
+  <!-- 已经配过：短暂显示，给一个改地址的入口 -->
+  <div class="card" id="opening" hidden>
+    <div class="mark">📊</div>
+    <h1>看板娘</h1>
+    <div class="spin"></div>
+    <p class="target" id="target"></p>
+    <button class="link" id="change">切换站点</button>
+  </div>
+
 <script>
-  /* 站点迟迟不回来（弱网 / 服务没起）时给一句实话，别让用户一直盯着转圈 */
-  setTimeout(function () {
-    var h = document.getElementById('hint');
-    if (h) h.textContent = '加载较慢，请检查网络';
-  }, 8000);
+(function () {
+  var has = (typeof WorkCheckNative !== 'undefined');
+  var saved = has ? WorkCheckNative.getSavedSite() : '';
+  var timer = null;
+
+  function show(id) {
+    document.getElementById('setup').hidden = (id !== 'setup');
+    document.getElementById('opening').hidden = (id !== 'opening');
+  }
+
+  if (saved) {
+    show('opening');
+    document.getElementById('target').textContent = saved;
+    // 留一小会儿，让人来得及点「切换站点」
+    timer = setTimeout(function () { WorkCheckNative.openSite(saved); }, 1500);
+    document.getElementById('change').onclick = function () {
+      clearTimeout(timer);
+      show('setup');
+    };
+  } else {
+    show('setup');
+  }
+
+  var input = document.getElementById('url');
+  var err = document.getElementById('err');
+
+  function fail(msg) {
+    err.textContent = msg;
+    err.hidden = false;
+  }
+
+  function save() {
+    if (!has) { fail('这个页面只能在 App 内使用'); return; }
+    var msg = WorkCheckNative.saveSite(input.value);
+    // 空串表示原生已接手（会自己加载站点）；有内容则是错误提示，留在本页等用户改
+    if (msg) { fail(msg); }
+  }
+
+  document.getElementById('save').onclick = save;
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { save(); }
+  });
+})();
 </script>
 </body>
 </html>

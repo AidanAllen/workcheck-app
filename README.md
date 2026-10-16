@@ -27,6 +27,19 @@ docs/android-app-design.md 完整设计与真机验收清单
 | APK | Android 8~15、华为 HarmonyOS 2 / 3 / 4 |
 | 待做 HAP | 华为 HarmonyOS NEXT 5 —— **不支持 APK**，需另出 ArkTS + ArkWeb 鸿蒙包 |
 
+## 站点地址由使用者填写
+
+App **不写死任何站点地址**。首次启动会落在本地配置页（`www/index.html`），
+让使用者填自己的看板地址，存进本机 SharedPreferences，之后每次启动直接打开。
+
+- 没写 `https://` 会自动补齐
+- 只接受 HTTPS —— 明文 http 被 `usesCleartextTraffic=false` 禁掉，填了也加载不了
+- 已配过之后，启动页停留约 1.5 秒，期间可以点「切换站点」重新填写
+- 导航白名单只放行「用户填的那个站点 + 飞书两个域」，其余一律交系统浏览器
+
+这样同一个 APK 可以分发给不同的人，各自连到自己的站点。
+想彻底重来一次的话，清除 App 数据即可回到配置页。
+
 ## 本地构建
 
 ```bash
