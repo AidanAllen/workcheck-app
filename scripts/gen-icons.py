@@ -98,14 +98,12 @@ def apply_mask(im, mask):
     return out
 
 
-def save(im, path, colors=None):
-    """存 PNG。colors 给定就做调色板量化——插画渐变用 256 色肉眼看不出差别，
+def save(im, path, colors):
+    """存 PNG。统一做调色板量化——插画渐变用 256 色肉眼看不出差别，
     体积却能砍掉一多半；FASTOCTREE 是唯一支持带 alpha 量化的算法。"""
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    out = im
-    if colors:
-        out = im.convert("RGBA").quantize(colors=colors, method=Image.Quantize.FASTOCTREE,
-                                          dither=Image.Dither.FLOYDSTEINBERG)
+    out = im.convert("RGBA").quantize(colors=colors, method=Image.Quantize.FASTOCTREE,
+                                      dither=Image.Dither.FLOYDSTEINBERG)
     out.save(path, "PNG", optimize=True)
     return os.path.getsize(path)
 

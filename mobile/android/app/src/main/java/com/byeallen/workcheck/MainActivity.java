@@ -240,11 +240,6 @@ public class MainActivity extends BridgeActivity {
             if (url == null || url.isEmpty()) return;
             mainHandler.post(() -> loadSite(url));
         }
-
-        @JavascriptInterface
-        public String appVersion() {
-            return BuildConfig.VERSION_NAME;
-        }
     }
 
     private void loadSite(String url) {

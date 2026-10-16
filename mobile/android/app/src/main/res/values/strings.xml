@@ -2,6 +2,4 @@
 <resources>
     <string name="app_name">看板娘</string>
     <string name="title_activity_main">看板娘</string>
-    <string name="package_name">com.byeallen.workcheck</string>
-    <string name="custom_url_scheme">com.byeallen.workcheck</string>
 </resources>

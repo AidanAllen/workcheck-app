@@ -33,6 +33,10 @@ local.properties
 # 给网页端仓库用的改动补丁，不属于本仓库
 *.patch
 
+# Python 产物（scripts/gen-icons.py）
+__pycache__/
+*.py[cod]
+
 # 本地会话与工作记录
 .workbuddy/
 
