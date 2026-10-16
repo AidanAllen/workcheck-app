@@ -1,0 +1,17 @@
+{
+  "name": "workcheck-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "WorkCheck 安卓壳 —— 只装线上站点，不含业务代码",
+  "scripts": {
+    "sync": "cap sync android",
+    "open": "cap open android",
+    "apk": "cd android && ./gradlew assembleRelease"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "@capacitor/android": "^7.6.9",
+    "@capacitor/cli": "^7.6.9",
+    "@capacitor/core": "^7.6.9"
+  }
+}

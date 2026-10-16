@@ -1,0 +1,35 @@
+# 安卓分支专用忽略规则（网页端代码在 main 分支，本分支不含 server/ public/）
+
+# 构建产物：要装就重新构建，别把包体放进版本库
+*.apk
+*.aab
+*.aab.idsig
+
+# 签名密钥与口令：一旦入库，别人就能冒名签出「官方升级包」
+*.jks
+*.keystore
+keystore.properties
+
+# Gradle / Capacitor 生成的中间产物
+node_modules/
+mobile/android/app/build/
+mobile/android/build/
+mobile/android/capacitor-cordova-android-plugins/build/
+mobile/android/.gradle/
+mobile/android/local.properties
+local.properties
+
+# 给 main 分支用的网页改动补丁，不属于本分支
+*.patch
+
+# 本地会话与工作记录
+.workbuddy/
+
+# 编辑器与系统文件
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+*.log
+npm-debug.log*

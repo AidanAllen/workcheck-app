@@ -1,0 +1,16 @@
+{
+  "appId": "com.byeallen.workcheck",
+  "appName": "看板娘",
+  "webDir": "www",
+  "loggingBehavior": "none",
+  "server": {
+    "url": "https://workcheck.byeallen.com/",
+    "cleartext": false,
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": false,
+    "webContentsDebuggingEnabled": false,
+    "captureInput": true
+  }
+}

@@ -1,0 +1,11 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <!-- 覆盖 capacitor-android 库里的同名默认色：库里那套是蓝色系，跟页面的深色玻璃不搭。
+         App module 的资源优先级高于依赖库，同名即覆盖。 -->
+    <color name="colorPrimary">#ff9fb9</color>
+    <color name="colorPrimaryDark">#1d1519</color>
+    <color name="colorAccent">#ff9fb9</color>
+
+    <!-- 启动屏底色：跟看板背景同色，冷启动时不会先闪一块白 -->
+    <color name="splashBackground">#1d1519</color>
+</resources>

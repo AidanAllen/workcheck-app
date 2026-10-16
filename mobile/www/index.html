@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1d1519">
+<title>看板娘</title>
+<style>
+  /* 这是 App 内的首帧占位页：真实内容来自 capacitor.config.json 里的远程站点。
+     它的唯一任务是别让用户对着白屏 —— 站点首字节回来之前一直显示它。 */
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+    background: #1d1519;
+    color: #fbe9ee;
+    font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    padding: calc(24px + env(safe-area-inset-top)) 24px calc(24px + env(safe-area-inset-bottom));
+  }
+  .mark { font-size: 40px; line-height: 1; }
+  .name { font-size: 15px; letter-spacing: .04em; opacity: .9; }
+  .spin {
+    width: 26px; height: 26px; border-radius: 50%;
+    border: 2px solid rgba(255, 159, 185, .25);
+    border-top-color: #ff9fb9;
+    animation: spin .9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spin { animation-duration: 2.4s; } }
+  .hint { font-size: 12px; color: #9c8290; }
+</style>
+</head>
+<body>
+  <div class="mark">📊</div>
+  <div class="name">看板娘</div>
+  <div class="spin" id="spin"></div>
+  <div class="hint" id="hint">正在连接看板…</div>
+<script>
+  /* 站点迟迟不回来（弱网 / 服务没起）时给一句实话，别让用户一直盯着转圈 */
+  setTimeout(function () {
+    var h = document.getElementById('hint');
+    if (h) h.textContent = '加载较慢，请检查网络';
+  }, 8000);
+</script>
+</body>
+</html>
