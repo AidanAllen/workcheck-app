@@ -1,7 +1,7 @@
 # WorkCheck 安卓壳工程（App 名：看板娘）
 
 把一个线上看板站点封装成安卓 App。
-**网页端代码在另一个仓库** —— <[https://github.com/<组织>/workcheck](https://github.com/AidanAllen/workcheck)>，两边各自独立演进，不需要互相同步。
+**网页端代码在另一个<仓库(https://github.com/AidanAllen/workcheck)>** —— ，两边各自独立演进，不需要互相同步。
 
 > **文档里的 `workcheck.example.com` 是占位域名**，不是真实站点。
 > `example.com` 是 RFC 2606 保留的文档专用域，不会解析到任何真实主机。
