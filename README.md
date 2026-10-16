@@ -14,6 +14,8 @@ App 本身不含任何业务页面：只有一个原生 WebView，内容全部�
 
 ```
 workcheck-app/
+├── .github/workflows/
+│   └── android-release.yml  出 APK 的云端构建（打 v* tag 自动跑，也可手动触发）
 ├── mobile/
 │   ├── android/              Capacitor 7 生成的安卓工程（包名 com.byeallen.workcheck）
 │   ├── capacitor.config.json 导航白名单、WebView 参数、androidScheme
@@ -22,8 +24,7 @@ workcheck-app/
 │   └── resources/            App 图标原始素材
 ├── scripts/gen-icons.py      从一张原图生成全套安卓图标
 ├── docs/
-│   ├── android-app-design.md 方案与真机验收清单（方案阶段记录，与代码不一致时以代码为准）
-│   └── ci/android-release.yml 出 APK 的云端构建（需手工放进 .github/workflows/）
+│   └── android-app-design.md 方案与真机验收清单（方案阶段记录，与代码不一致时以代码为准）
 └── README.md
 ```
 
@@ -72,18 +73,23 @@ cd mobile/android
 
 ## 云端构建（推荐）
 
-> **首次启用要在 GitHub 网页上做一次**：把 `docs/ci/android-release.yml` 原样放进
-> `.github/workflows/android-release.yml` 即可（Add file → Create new file，
-> 路径框里直接填全路径，内容粘贴进去）。
-> 原因是本仓库最初是用一个缺 `workflow` 权限的令牌推的，
-> GitHub 会拒绝「通过 git 创建 `.github/workflows/*`」，网页创建则不受此限。
-> 该文件放在 `docs/ci/` 而不是 `.github/`，就是为了绕开这个限制。
-
 push 一个 `v*` 类型的 tag 到**本仓库**，`.github/workflows/android-release.yml`
-会自动构建，APK 挂在 Actions 产物里直接下载。也可以在 Actions 页面手动触发一次。
+会自动构建，并把 APK 直接附到对应的 Release 上。也可以在 Actions 页面手动触发一次
+（手动触发只出产物、不上传 Release）。
+
+JDK 21、Android SDK、Node 22 全在 runner 上现装，本机不需要任何安卓工具链。
+
+### 签名
 
 配了 `KEYSTORE_B64` / `KEYSTORE_PASSWORD` / `KEY_ALIAS` / `KEY_PASSWORD`
-四个 Secrets 就出签名包，没配则出未签名的包。
+四个 Secrets 就用正式密钥签名。
+
+**没配也会签名** —— 此时由 CI 现场生成一把临时密钥（`keytool`，有效期 30 年）并完成签名。
+这是必须的：未签名的 release 包是 `app-release-unsigned.apk`，**装不上**
+（`INSTALL_PARSE_FAILED_NO_CERTIFICATES`）。
+
+> ⚠️ 临时密钥每次构建都不同，用它签出的包之间**无法覆盖升级**（要先卸载）。
+> 正式分发前务必配好上面四个 Secrets，保持签名证书稳定。
 
 ## 发布签名
 
@@ -182,4 +188,5 @@ python scripts/gen-icons.py 原图.png --assets mobile/resources
 - 首次真机冒烟（验收清单见 `docs/android-app-design.md` 第 7 节）
 - 替换启动图（现为 Capacitor 默认图）
 - 鸿蒙 NEXT 包（`mobile/harmony` ArkTS 工程，取决于目标机型）
-- 把 `docs/ci/android-release.yml` 放进 `.github/workflows/`
+- 配置签名的四个 Secrets（`KEYSTORE_B64` 等）—— 目前出的是 CI 临时密钥签的包，
+  正式分发前需要换成固定证书，否则版本之间无法覆盖升级

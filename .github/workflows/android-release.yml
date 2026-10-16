@@ -1,0 +1,104 @@
+name: Android 打包
+
+# 打 tag（v2.0.1 这种）自动出包并附到 Release，也可以在 Actions 页面手动点一次。
+# 本机不需要装 JDK / Android SDK：整个构建都在 runner 上跑完，产物直接下载。
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write        # 打 tag 时要把 APK 上传到 Release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # 放在 job 级，step 的 if / shell 才能读到（step 自己的 env 在 if 求值之后才生效）
+      KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'          # 必须是 21：Capacitor 7 的 capacitor-android 用 Java 21 编译（JDK 17 会报"无效的源发行版: 21"）
+
+      - uses: android-actions/setup-android@v3
+
+      # AGP 会按需自动下载 SDK 组件，前提是许可已接受；这里显式接受并预装，
+      # 避免首次构建卡在许可确认上。装不上也不致命（AGP 会自己补），所以不阻断。
+      - name: 接受 SDK 许可并预装组件
+        run: |
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0" > /dev/null 2>&1 || true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 安装 Capacitor 依赖
+        working-directory: mobile
+        run: npm ci
+
+      - name: 同步 Web 资源与配置
+        working-directory: mobile
+        run: npx cap sync android
+
+      # 有正式签名密钥就用它；没有就现场生成一把并签名。
+      # 必须签名：未签名的 release 包是 app-release-unsigned.apk，装不上
+      # （INSTALL_PARSE_FAILED_NO_CERTIFICATES）。
+      - name: 准备签名
+        working-directory: mobile/android
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > ../workcheck.jks
+            cat > keystore.properties <<EOF
+          storeFile=../workcheck.jks
+          storePassword=$KEYSTORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
+            echo "使用仓库 Secrets 里的正式签名密钥"
+          else
+            keytool -genkeypair -v \
+              -keystore ../workcheck.jks -alias workcheck \
+              -keyalg RSA -keysize 2048 -validity 10950 \
+              -storepass android -keypass android \
+              -dname "CN=WorkCheck, OU=Mobile, O=WorkCheck, L=Unknown, S=Unknown, C=CN"
+            cat > keystore.properties <<EOF
+          storeFile=../workcheck.jks
+          storePassword=android
+          keyAlias=workcheck
+          keyPassword=android
+          EOF
+            echo "::warning::未配置 KEYSTORE_B64 等四个 Secrets，已用本次构建现场生成的临时密钥签名。APK 可以安装，但不同 runner 生成的密钥不同，届时覆盖升级会失败（需先卸载）。正式分发前请配置 Secrets。"
+          fi
+
+      - name: 构建 Release APK
+        working-directory: mobile/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      # keystore.properties 与 .jks 都在 .gitignore 里，不会进仓库；这里多删一次防误传
+      - name: 清理签名临时文件
+        if: always()
+        working-directory: mobile/android
+        run: rm -f keystore.properties ../workcheck.jks
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workcheck-apk
+          path: mobile/android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+      # 打 tag 时顺手把 APK 附到对应 Release；手动触发不上传（没有对应的 tag）
+      - name: 上传 APK 到 Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" mobile/android/app/build/outputs/apk/release/*.apk --clobber
