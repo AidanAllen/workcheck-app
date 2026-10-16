@@ -201,7 +201,7 @@ public class MainActivity extends BridgeActivity {
         String scheme = u.getScheme() == null ? "" : u.getScheme().toLowerCase();
         String host = u.getHost();
         if (host == null || host.isEmpty()) {
-            return "ERR:地址格式不对，形如 https://workcheck.byeallen.com/";
+            return "ERR:地址格式不对，形如 https://workcheck.example.com/";
         }
         if (!"https".equals(scheme)) {
             // Manifest 里 usesCleartextTraffic=false，明文就算存了也加载不了，直接挡在入口上

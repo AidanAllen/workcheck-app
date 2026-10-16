@@ -1,7 +1,11 @@
 # WorkCheck 安卓壳工程（App 名：看板娘）
 
-把线上站点 <https://workcheck.byeallen.com/> 封装成安卓 App。
-**网页端代码在另一个仓库** —— <https://github.com/AidanAllen/workcheck>，两边各自独立演进，不需要互相同步。
+把一个线上看板站点封装成安卓 App。
+**网页端代码在另一个仓库** —— <https://github.com/<组织>/workcheck>，两边各自独立演进，不需要互相同步。
+
+> **文档里的 `workcheck.example.com` 是占位域名**，不是真实站点。
+> `example.com` 是 RFC 2606 保留的文档专用域，不会解析到任何真实主机。
+> App 本身也不写死任何站点地址 —— 实际地址由使用者首次启动时填写（见下节）。
 
 App 本身不含任何业务页面：只有一个原生 WebView，内容全部实时从线上站点加载。
 所以改网页不需要重新发 App 版本，服务器重启后所有已安装的 App 立刻看到新版本。
@@ -146,6 +150,32 @@ python scripts/gen-icons.py 原图.png --assets mobile/resources
 - `res/drawable*/splash.png` —— 启动屏占位图，等品牌素材替换（图标脚本不覆盖启动图）。
 - `variables.gradle` 的 `androidxActivityVersion` / `androidxFragmentVersion` ——
   Capacitor 模板的标准变量，原生插件的 Gradle 片段按名取用，删了会在加插件时踩坑。
+
+## 数据脱敏约定
+
+仓库文档与打包产物里**不出现真实站点域名**。统一用占位域 `workcheck.example.com`，
+仓库地址用 `<组织>/workcheck`。合计 13 处（站点域名 11 处 + 仓库地址 2 处）：
+
+| 位置 | 站点域名 | 仓库地址 |
+|---|---|---|
+| `docs/android-app-design.md` | 8 | 1 |
+| `README.md` | 1（+1 见下方说明） | 1 |
+| `MainActivity.java` 地址校验错误提示 | 1 | — |
+| `www/index.html` 输入框占位符 | 1 | — |
+
+> README 里现有 2 处 `workcheck.example.com` 字面量：开头说明 1 处（替换所得），
+> 本节约定说明 1 处（为讲清占位规则新增）。
+
+后两行**会打进 APK**：用户填错地址时的报错文案、首次启动配置页的输入框示例，
+都是使用者直接看到的内容，属于本次脱敏里最该处理的部分。
+
+**未做替换**：包名 `com.byeallen.workcheck`。它是代码标识符，同时存在于
+`build.gradle` / `capacitor.config.json` / `AndroidManifest.xml` / 源码目录结构，
+只改文档会造成文档与代码不一致；且它已随 APK 包名公开发布，改动会中断覆盖升级路径。
+
+> 注意：Git 历史里仍有脱敏前的地址（本仓库的提交历史未改写）。
+> 若需要彻底清除，必须重写历史并强制推送 —— 这会改变所有已有提交的哈希，
+> 影响已克隆该仓库的所有副本，需另行决定是否执行。
 
 ## 待办
 

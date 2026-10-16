@@ -1,6 +1,6 @@
 # WorkCheck 安卓 / 华为鸿蒙 App 技术设计方案
 
-> 目标：把已部署站点 `https://workcheck.byeallen.com/` 封装成移动端 App，
+> 目标：把已部署站点 `https://workcheck.example.com/` 封装成移动端 App，
 > 在**普通安卓手机**与**华为手机（含 HarmonyOS）**上都能稳定、完整地使用全部功能
 > （看板、日志 SSE、签到日历、接入配置登录、飞书 OAuth 授权）。
 >
@@ -14,7 +14,7 @@
 | 项 | 结论 |
 |---|---|
 | 推荐方案 | **Capacitor 7（Android）** 做安卓/HarmonyOS 3~4 的壳；**ArkTS ArkWeb** 做 HarmonyOS NEXT 的壳（按需） |
-| 加载方式 | 远程 URL `https://workcheck.byeallen.com/`，不打包前端代码进 App |
+| 加载方式 | 远程 URL `https://workcheck.example.com/`，不打包前端代码进 App |
 | 构建方式 | **GitHub Actions 云构建**（本机当前无 JDK / Android SDK / Gradle，无需安装即可出 APK） |
 | 体积预估 | Android 壳 ~6–10 MB；鸿蒙壳 ~1 MB |
 | 必须先改的服务端项 | **飞书 OAuth 回调地址**（现默认 `http://localhost:3000/feishu/callback`，App 内必然失败） |
@@ -91,7 +91,7 @@ workcheck/
 └────────────────────────────────────────────────────────┘
                         │ HTTPS (TLS, HSTS)
                         ▼
-        https://workcheck.byeallen.com/  (Express + SQLite)
+        https://workcheck.example.com/  (Express + SQLite)
 ```
 
 ---
@@ -121,7 +121,7 @@ npx cap add android
   "appName": "看板娘",
   "webDir": "www",
   "server": {
-    "url": "https://workcheck.byeallen.com/",
+    "url": "https://workcheck.example.com/",
     "cleartext": false,
     "androidScheme": "https"
   },
@@ -198,13 +198,13 @@ public class MainActivity extends BridgeActivity {
 
 | 域名 | 处理 |
 |---|---|
-| `workcheck.byeallen.com` | ✅ WebView 内打开（主站） |
+| `workcheck.example.com` | ✅ WebView 内打开（主站） |
 | `open.feishu.cn` / `accounts.feishu.cn` / `passport.feishu.cn` / `*.feishu.cn` | ✅ WebView 内打开（OAuth 授权链路） |
 | 其它一切 | ⤴ 交给系统浏览器（`Intent.ACTION_VIEW`），壳内不留 |
 
 ```java
 private static final String[] IN_APP_HOSTS = {
-  "workcheck.byeallen.com", ".feishu.cn"
+  "workcheck.example.com", ".feishu.cn"
 };
 
 @Override
@@ -291,7 +291,7 @@ struct Index {
 
   build() {
     Stack() {
-      Web({ src: 'https://workcheck.byeallen.com/', controller: this.controller })
+      Web({ src: 'https://workcheck.example.com/', controller: this.controller })
         .domStorageAccess(true)          // localStorage：主题/折叠偏好
         .fileAccess(false)
         .javaScriptAccess(true)
@@ -446,7 +446,7 @@ keytool -genkeypair -v -keystore workcheck.jks -keyalg RSA -keysize 2048 \
 
 ### 9.1 让代码改动生效 —— 必须打新 tag
 
-compose 里钉的是 `https://github.com/AidanAllen/workcheck.git#v1.0.0`，
+compose 里钉的是 `https://github.com/<组织>/workcheck.git#v1.0.0`，
 所以改完代码直接 `docker compose up -d --build` **拿不到新代码**（还是旧 tag）。流程：
 
 ```bash
@@ -469,7 +469,7 @@ docker compose up -d --build
 飞书开发者后台 →「安全设置 → 重定向 URL」加入：
 
 ```
-https://workcheck.byeallen.com/feishu/callback
+https://workcheck.example.com/feishu/callback
 ```
 
 不加会报 20029（授权页报错，用户完全看不出是地址问题）。页面上有「回调地址比对」工具可逐字核对。
