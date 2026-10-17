@@ -45,7 +45,10 @@ App **不写死任何站点地址**。首次启动会落在本地配置页（`ww
 
 - 没写 `https://` 会自动补齐
 - 只接受 HTTPS —— 明文 http 被 `usesCleartextTraffic=false` 禁掉，填了也加载不了
-- 已配过之后，启动页停留约 1.5 秒，期间可以点「切换站点」重新填写
+- **配过之后启动直达站点**：`onCreate()` 里直接 `loadUrl`，顶掉 Capacitor 刚发起的本地页加载，
+  不再经过中转页（旧版要干等 1.5 秒才跳）
+- 地址填错会落到内置错误页，上面有「换个地址」回到配置页 —— 走 `https://localhost/#setup`，
+  带 `#setup` 才停在填写表单上，否则会被自动跳走
 - 导航白名单只放行「用户填的那个站点 + 飞书两个域（`feishu.cn` / `larksuite.com`）」，其余一律交系统浏览器
 
 这样同一个 APK 可以分发给不同的人，各自连到自己的站点。
@@ -128,7 +131,10 @@ python scripts/gen-icons.py 原图.png --assets mobile/resources
   把状态栏 / 导航条一起设成透明，配置里 `android.adjustMarginsForEdgeToEdge = disable`
   让 Capacitor 不再给 WebView 加 margin（加了 margin 状态栏那一条就只剩窗口背景色，即黑条）。
   API 29+ 还要关掉 `setStatusBarContrastEnforced`，否则系统为保证图标可见会自己糊一层半透明遮罩。
-- **顶部避让**：沉浸之后内容会跑到状态栏底下，避让靠 `injectSafeArea()`：
+- **顶栏「↺ 默认排序」**：手机上看板不做拖拽排序，`injectPageTweaks()` 注入
+  `#resetOrder{display:none !important}` 藏掉。它由页面 JS 按排序状态切 `hidden` 属性，
+  不用 `!important` 压不住。
+- **顶部避让**：沉浸之后内容会跑到状态栏底下，避让靠 `injectPageTweaks()`：
   页面加载完注入 `--app-safe-top` / `--app-safe-bottom`（原生量出来的真实高度，单位 CSS px）；
   再探测一次 `env(safe-area-inset-top)`，WebView 老内核恒为 0，此时补一层透明 `border` 把内容顶下去
   （用 border 而非 padding，不会顶掉页面原有的 padding，背景图也照样画满状态栏那一条）。

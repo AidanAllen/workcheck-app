@@ -99,17 +99,22 @@
     document.getElementById('opening').hidden = (id !== 'opening');
   }
 
-  if (saved) {
+  // 错误页的「换个地址」带 #setup 进来：停在填写表单上，别再自动跳走
+  var forceSetup = (location.hash === '#setup');
+
+  if (saved && !forceSetup) {
     show('opening');
     document.getElementById('target').textContent = saved;
-    // 留一小会儿，让人来得及点「切换站点」
-    timer = setTimeout(function () { WorkCheckNative.openSite(saved); }, 1500);
+    // 原生启动已经直达站点了，这条只是兜底路径，不再干等 1.5 秒
+    timer = setTimeout(function () { WorkCheckNative.openSite(saved); }, 0);
     document.getElementById('change').onclick = function () {
       clearTimeout(timer);
       show('setup');
     };
   } else {
     show('setup');
+    // 改地址的场景：把上次填的带出来，省得重打一遍
+    if (saved) { document.getElementById('url').value = saved; }
   }
 
   var input = document.getElementById('url');

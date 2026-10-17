@@ -60,10 +60,14 @@ public class MainActivity extends BridgeActivity {
         + ".t{font-size:16px;font-weight:600}.d{font-size:13px;color:#9c8290;line-height:1.7;max-width:300px}"
         + "a{display:inline-block;margin-top:8px;padding:10px 22px;border-radius:999px;background:#ff9fb9;"
         + "color:#3a1f28;font-size:14px;font-weight:600;text-decoration:none}"
+        + "a.alt{background:none;color:#9c8290;border:1px solid rgba(255,159,185,.22)}"
         + "</style></head><body>"
         + "<div class='t'>打不开看板</div>"
         + "<div class='d'>可能是网络不通，或者服务没在跑。<br>确认后再试一次。</div>"
         + "<a href='/'>重试</a>"
+        // 直达站点之后就没有中转页了，地址填错时得有个能回去改的入口。
+        // #setup 是给本地配置页看的：带它就停在填写表单上，不再自动跳走。
+        + "<a class='alt' href='https://localhost/#setup'>换个地址</a>"
         + "</body></html>";
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -82,6 +86,12 @@ public class MainActivity extends BridgeActivity {
         siteUrl = getSharedPreferences(PREFS, MODE_PRIVATE).getString(PREF_SITE, "");
         applyTransparentSystemBars();
         tuneWebView();
+        // 已经配过站点：直接 loadUrl 顶掉 Capacitor 刚发起的本地页加载，
+        // 一启动就是看板本身，不再经过「看板娘」中转页（那一版要干等 1.5 秒才跳）。
+        // 没配过就留在本地配置页（www/index.html）让使用者填地址。
+        if (!siteUrl.isEmpty()) {
+            loadSite(siteUrl);
+        }
     }
 
     /**
@@ -125,15 +135,16 @@ public class MainActivity extends BridgeActivity {
     }
 
     /**
-     * 页面加载完，把安全区尺寸交给网页。做三件事：
+     * 页面加载完注入。做四件事：
      *   1. 挂上 --app-safe-top / --app-safe-bottom，页面想用直接用（比 env() 可靠）
      *   2. html 自己没背景图、body 有的话，把背景图同步到 html —— 保证状态栏那一条
      *      画的是页面那张背景图，而不是 WebView 的默认底色
-     *   3. 探测 env(safe-area-inset-top) 是不是真的有值；没有就补一层透明 border 把内容顶下去
+     *   3. 隐藏顶栏的「↺ 默认排序」按钮（手机上看板上用不到，还原排序在网页端做）
+     *   4. 探测 env(safe-area-inset-top) 是不是真的有值；没有就补一层透明 border 把内容顶下去
      *      —— 用 border 而不是 padding，既不会顶掉页面原有的 padding，
      *         背景图（background-clip 默认 border-box）也照样画满状态栏那一条。
      */
-    private void injectSafeArea(WebView view) {
+    private void injectPageTweaks(WebView view) {
         readSystemBarInsets();
         if (safeTopCssPx <= 0 && safeBottomCssPx <= 0) return;
         final String js =
@@ -147,6 +158,12 @@ public class MainActivity extends BridgeActivity {
             + "r.style.backgroundImage=b.backgroundImage;r.style.backgroundSize=b.backgroundSize;"
             + "r.style.backgroundPosition=b.backgroundPosition;r.style.backgroundRepeat=b.backgroundRepeat;"
             + "r.style.backgroundAttachment=b.backgroundAttachment}"
+            // 顶栏「↺ 默认排序」：手机上看板不做拖拽排序，留着只是占地方。
+            // 它是 JS 按排序状态切换 hidden 属性的，用 !important 才压得住。
+            + "if(!document.getElementById('app-page-tweaks')){"
+            + "var t=document.createElement('style');t.id='app-page-tweaks';"
+            + "t.textContent='#resetOrder,button[title*=\"\\u9ed8\\u8ba4\\u6392\\u5e8f\"]{display:none !important}';"
+            + "(document.head||r).appendChild(t)}"
             + "var p=document.createElement('div');"
             + "p.style.cssText='position:absolute;left:0;top:0;width:0;height:0;"
             + "padding-top:env(safe-area-inset-top);visibility:hidden;pointer-events:none';"
@@ -364,7 +381,7 @@ public class MainActivity extends BridgeActivity {
         @Override
         public void onPageFinished(WebView view, String url) {
             super.onPageFinished(view, url);
-            injectSafeArea(view);
+            injectPageTweaks(view);
         }
 
         @Override
