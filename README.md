@@ -229,11 +229,10 @@ python scripts/gen-icons.py 原图.png --assets mobile/resources
 
 ## 待办
 
-- 首次真机冒烟（验收清单见 `docs/android-app-design.md` 第 7 节）
+- 首次真机冒烟（验收清单见 `docs/android-app-design.md` 第 7 节）—— v1.0.7 已在真机逐项过了一遍
 - 替换启动图（现为 Capacitor 默认图）
 - 鸿蒙 NEXT 包（`mobile/harmony` ArkTS 工程，取决于目标机型）
-- 配置签名的四个 Secrets（`KEYSTORE_B64` 等）—— 目前出的是 CI 临时密钥签的包，
-  正式分发前需要换成固定证书，否则版本之间无法覆盖升级
+- 站点侧两项缺陷待按 `docs/web-updates.patch` 改进（飞书回调、SSE 重连）
 
 ## 站点侧待办（App 解决不了，得改站点）
 
