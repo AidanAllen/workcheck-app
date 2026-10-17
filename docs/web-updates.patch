@@ -1,0 +1,407 @@
+diff --git a/package.json b/package.json
+index cfec636..964ad37 100644
+--- a/package.json
++++ b/package.json
+@@ -6,7 +6,8 @@
+   "main": "server/index.js",
+   "scripts": {
+     "start": "node server/index.js",
+-    "selftest": "node scripts/selftest.js"
++    "selftest": "node scripts/selftest.js",
++    "test:redirect": "node scripts/test-redirect.js"
+   },
+   "dependencies": {
+     "express": "^4.21.2",
+diff --git a/public/app.js b/public/app.js
+index 9a73729..0eb345c 100644
+--- a/public/app.js
++++ b/public/app.js
+@@ -864,9 +864,26 @@ async function refreshAll() {
+   await renderEvents();
+ }
+ 
++/* 实时日志流。
++   手机 App 里切后台是常态：系统会把 SSE 冻住，回到前台后它既不报错也不恢复，
++   一直挂在「已连接」其实是死的。所以除了 EventSource 自带的重连，还要：
++     · CLOSED（彻底断掉，浏览器不会自己再来）→ 指数退避重建
++     · 回到前台 / 页面重新可见 → 若不是 OPEN 就立刻重建
++     · 网络恢复（online）→ 重置退避重连 */
++let logStream = null;
++let streamRetry = 0;
++let streamTimer = null;
++
+ function connectStream() {
++  if (logStream) {
++    logStream.close();
++    logStream = null;
++  }
+   const es = new EventSource('/api/stream/logs');
++  logStream = es;
++
+   es.addEventListener('hello', () => {
++    streamRetry = 0;
+     $('streamState').textContent = '已连接，实时接收';
+     $('liveDot').classList.remove('off');
+   });
+@@ -880,9 +897,41 @@ function connectStream() {
+   es.onerror = () => {
+     $('streamState').textContent = '连接中断，正在重连…';
+     $('liveDot').classList.add('off');
++    // 只有 CLOSED 需要自己动手：CONNECTING 状态下浏览器会按自身的节奏重试
++    if (es.readyState === EventSource.CLOSED) scheduleStream();
+   };
+ }
+ 
++function scheduleStream() {
++  if (streamTimer) return;
++  const wait = Math.min(30_000, 1000 * 2 ** streamRetry++);
++  streamTimer = setTimeout(() => {
++    streamTimer = null;
++    connectStream();
++  }, wait);
++}
++
++/** 回到前台 / 网络恢复时把「假活」的流换掉 */
++function reviveStream() {
++  if (streamTimer) {
++    clearTimeout(streamTimer);
++    streamTimer = null;
++  }
++  if (logStream && logStream.readyState === EventSource.OPEN) return;
++  streamRetry = 0;
++  connectStream();
++}
++
++document.addEventListener('visibilitychange', () => {
++  if (!document.hidden) reviveStream();
++});
++// iOS/部分安卓 WebView 从后台返回时不一定触发 visibilitychange，pageshow 兜一层
++window.addEventListener('pageshow', reviveStream);
++window.addEventListener('online', () => {
++  streamRetry = 0;
++  connectStream();
++});
++
+ /** 标签切换：看板（图形+汇总）与日志/报文分开，首页不被运维细节淹没 */
+ const PANES = { dash: 'paneDash', logs: 'paneLogs' };
+ 
+diff --git a/public/index.html b/public/index.html
+index f44d8be..94b4bd2 100644
+--- a/public/index.html
++++ b/public/index.html
+@@ -2,7 +2,10 @@
+ <html lang="zh-CN">
+ <head>
+ <meta charset="utf-8">
+-<meta name="viewport" content="width=device-width, initial-scale=1">
++<!-- viewport-fit=cover：让内容铺到刘海/挖孔两侧，配合 CSS 的 safe-area 内边距使用。
++     桌面浏览器上 env() 恒为 0，不影响既有观感 -->
++<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
++<meta name="theme-color" content="#1d1519">
+ <title>数据接收看板 · workcheck</title>
+ <link rel="stylesheet" href="/style.css">
+ <link id="themeCss" rel="stylesheet">
+diff --git a/public/setup.html b/public/setup.html
+index be0f501..c3ac8ec 100644
+--- a/public/setup.html
++++ b/public/setup.html
+@@ -2,7 +2,8 @@
+ <html lang="zh-CN">
+ <head>
+ <meta charset="utf-8">
+-<meta name="viewport" content="width=device-width, initial-scale=1">
++<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
++<meta name="theme-color" content="#1d1519">
+ <title>接入配置 · workcheck</title>
+ <link rel="stylesheet" href="/style.css">
+ <link id="themeCss" rel="stylesheet">
+diff --git a/public/style.css b/public/style.css
+index f20ed09..cd929ec 100644
+--- a/public/style.css
++++ b/public/style.css
+@@ -6,6 +6,11 @@
+    ================================================================== */
+ 
+ :root {
++  /* 告诉浏览器/App 的 WebView：页面本身就是深色，不要再做「强制深色」反色。
++     华为、小米等 ROM 的深色模式会把 WebView 整屏算法反色，深色玻璃面板会被反成一坨怪色。
++     声明了 color-scheme 后，表单控件、滚动条也按深色渲染，不会忽然冒出一块白底 */
++  color-scheme: dark;
++
+   /* 背景与容器（深褐黑取壁纸暗部，面板做玻璃） */
+   --bg: #1d1519;
+   --surface: rgba(38, 28, 34, 0.62);        /* 面板玻璃：半透明 + 模糊 */
+@@ -115,6 +120,8 @@
+ 
+ body {
+   margin: 0;
++  /* 滚到头 / 滚到底别触发浏览器的橡皮筋或下拉刷新：容器多的时候那一下拉伸看着像抖动 */
++  overscroll-behavior: none;
+   background:
+     radial-gradient(1200px 600px at 100% 0%, var(--glow-1) 0%, transparent 60%),
+     radial-gradient(900px 500px at 0% 100%, var(--glow-2) 0%, transparent 55%),
+@@ -135,7 +142,9 @@ body {
+   justify-content: space-between;
+   gap: 16px;
+   flex-wrap: wrap;
+-  padding: 14px 24px;
++  /* 刘海/挖孔在竖屏时吃顶部，横屏时吃侧边 —— 用 env() 让位，桌面端恒为 0 */
++  padding: calc(14px + env(safe-area-inset-top)) calc(24px + env(safe-area-inset-right))
++           14px calc(24px + env(safe-area-inset-left));
+   background: rgba(29, 21, 25, 0.66);
+   -webkit-backdrop-filter: blur(14px);
+   backdrop-filter: blur(14px);
+@@ -258,7 +267,13 @@ a.btn.mini:link, a.btn.mini:visited { padding: 4px 12px; font-size: 12px; }
+ }
+ .bal-topup { background: var(--ok-soft); color: var(--ok); font-weight: 600; border: 1px dashed var(--ok-border); }
+ 
+-main { padding: 22px 24px 48px; max-width: 1280px; margin: 0 auto; }
++/* 底部留给手势导航条：全屏手势的机型底部有一条系统横条，压住内容也压住操作 */
++main {
++  padding: 22px calc(24px + env(safe-area-inset-right))
++           calc(48px + env(safe-area-inset-bottom)) calc(24px + env(safe-area-inset-left));
++  max-width: 1280px;
++  margin: 0 auto;
++}
+ 
+ /* ------------------------------------------------------------ 主标签切换 */
+ 
+@@ -693,7 +708,7 @@ pre.payload {
+ .row-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+ 
+ .toast {
+-  position: fixed; right: 22px; bottom: 22px;
++  position: fixed; right: calc(22px + env(safe-area-inset-right)); bottom: calc(22px + env(safe-area-inset-bottom));
+   background: linear-gradient(135deg, var(--accent), var(--accent-deep)); color: var(--accent-on);
+   padding: 10px 18px; border-radius: var(--radius-pill); font-size: 13px; font-weight: 600;
+   opacity: 0; transform: translateY(8px);
+diff --git a/scripts/test-redirect.js b/scripts/test-redirect.js
+new file mode 100644
+index 0000000..c7a1f27
+--- /dev/null
++++ b/scripts/test-redirect.js
+@@ -0,0 +1,62 @@
++'use strict';
++
++/**
++ * 飞书回调地址的推导规则单测。
++ *
++ * 这条规则决定「App 里点飞书授权能不能走通」：回调写死 localhost 时，手机上
++ * 没有那个 3000 端口，授权链路直接断死。所以地址要能感知当前用哪个域名在访问。
++ *
++ * 跑：npm run test:redirect
++ */
++
++const os = require('os');
++const path = require('path');
++const fs = require('fs');
++
++// 在 require 之前把数据目录指到临时目录：测试会往 config.json 里写值，不能碰真实配置
++const tmp = path.join(os.tmpdir(), 'workcheck-redirect-test');
++fs.rmSync(tmp, { recursive: true, force: true });
++process.env.WORKCHECK_DATA_DIR = tmp;
++
++const config = require('../server/config.js');
++
++/** 造一个够用的 req：只需要 get() 和 protocol */
++const mkReq = (headers, protocol) => ({
++  get: (n) => (headers && headers[String(n).toLowerCase()] !== undefined ? headers[String(n).toLowerCase()] : undefined),
++  protocol,
++});
++
++const PUBLIC = { host: 'workcheck.byeallen.com', 'x-forwarded-proto': 'https' };
++const cases = [
++  ['本地直连（浏览器开 localhost）', mkReq({ host: 'localhost:3000' }, 'http'), 'http://localhost:3000/feishu/callback'],
++  ['公网 + 反代转发了 XFP', mkReq(PUBLIC, 'http'), 'https://workcheck.byeallen.com/feishu/callback'],
++  ['公网 + 反代没转发 XFP（兜底 https）', mkReq({ host: 'workcheck.byeallen.com' }, 'http'), 'https://workcheck.byeallen.com/feishu/callback'],
++  ['XFP 多值取第一个', mkReq({ host: 'workcheck.byeallen.com', 'x-forwarded-proto': 'https, http' }, 'http'), 'https://workcheck.byeallen.com/feishu/callback'],
++  ['X-Forwarded-Host 优先于 Host', mkReq({ host: '127.0.0.1:3000', 'x-forwarded-host': 'workcheck.byeallen.com', 'x-forwarded-proto': 'https' }, 'http'), 'https://workcheck.byeallen.com/feishu/callback'],
++  ['非法 host（注入）回落常量', mkReq({ host: 'evil.com\r\nX: y' }, 'https'), config.DEFAULT_REDIRECT],
++  ['拿不到 req（定时任务）回落常量', undefined, config.DEFAULT_REDIRECT],
++];
++
++let fail = 0;
++function check(name, got, want) {
++  const ok = got === want;
++  if (!ok) fail++;
++  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}`);
++  if (!ok) console.log(`      got=${got}\n      want=${want}`);
++}
++
++for (const [name, req, want] of cases) check(name, config.getRedirect(req), want);
++
++// 显式配置的优先级
++config.save('feishu', { appId: 'cli_test', appSecret: 's', redirectUri: 'https://custom.example.com/feishu/callback' });
++check('显式配置覆盖推导', config.getRedirect(mkReq(PUBLIC, 'http')), 'https://custom.example.com/feishu/callback');
++
++// 历史遗留的 localhost：公网访问时让位，本地访问时保留
++config.save('feishu', { redirectUri: 'http://localhost:3000/feishu/callback' });
++check('存着的 localhost 在公网访问时让位', config.getRedirect(mkReq(PUBLIC, 'http')), 'https://workcheck.byeallen.com/feishu/callback');
++check('同一个配置在本地访问时保留', config.getRedirect(mkReq({ host: 'localhost:3000' }, 'http')), 'http://localhost:3000/feishu/callback');
++check('同一个配置在本机 127.0.0.1 访问时保留', config.getRedirect(mkReq({ host: '127.0.0.1:3000' }, 'http')), 'http://localhost:3000/feishu/callback');
++
++fs.rmSync(tmp, { recursive: true, force: true });
++console.log(fail === 0 ? `\n全部通过（${cases.length + 4} 项）` : `\n失败 ${fail} 项`);
++process.exit(fail === 0 ? 0 : 1);
+diff --git a/server/config.js b/server/config.js
+index 73cc07d..7fa6734 100644
+--- a/server/config.js
++++ b/server/config.js
+@@ -29,11 +29,14 @@ const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
+  * 注意：**群 ID 不给默认值**。它是你的实际群标识，写进源码就等于跟着仓库公开出去
+  * （公开仓库里任何人拿到都能顺着 open_id 猜你的群配置）。留空时拉取会明确报
+  * 「未配置飞书群 ID」，去页面上填一次即可 —— 那份配置存在 data/config.json，不进版本库。
+- * 回调地址是通用值，不涉及具体账号，可以给默认。
++ * 回调地址是通用值，不涉及具体账号 —— 但**默认值不写死**：未显式配置时按
++ * 「当前这次访问的地址」推导，见文末 deriveRedirect / getRedirect。
++ * 只有拿不到请求对象时（比如定时任务里）才回落到 DEFAULT_REDIRECT 这个常量。
+  *
+  * **scope 不再是配置项**（以前放在表单里，现在去掉了）。理由见 DEFAULT_SCOPE 的说明。
+  */
+ const DEFAULT_CHAT_ID = '';
++/** 兜底中的兜底：推导不出访问地址时才用它（见 getRedirect） */
+ const DEFAULT_REDIRECT = 'http://localhost:3000/feishu/callback';
+ 
+ /**
+@@ -231,6 +234,69 @@ function reset(name) {
+   return { ok: true, ...view(name) };
+ }
+ 
++/**
++ * 按「当前这次请求的地址」推导飞书回调地址。
++ *
++ * 为什么要推导：手机 App（或手机浏览器）里点「飞书授权」，重定向发生在 App 的
++ * WebView 里 —— 回调写死 localhost 的话，飞书会把用户送回「手机自己」的 3000 端口，
++ * 那条路在手机上根本不通，授权链路断死。所以没显式配置时，用什么地址访问就用什么
++ * 地址拼回调：本地开发仍是 http://localhost:3000/feishu/callback，
++ * 线上自然变成 https://域名/feishu/callback。
++ *
++ * 反代场景要取 X-Forwarded-*：Node 直接看到的是 Nginx 转过来的 http，
++ * 拿 req.protocol 拼会拼出 http://，与飞书白名单里的 https 对不上。
++ * 连 X-Forwarded-Proto 都没有时，非本机访问一律按 https 算（公网服务几乎必然是 https，
++ * 且站点已开 HSTS）；本地 localhost 才回落 http。
++ */
++function deriveRedirect(req) {
++  if (!req || typeof req.get !== 'function') return '';
++  const host = String(req.get('x-forwarded-host') || req.get('host') || '')
++    .split(',')[0]
++    .trim()
++    .toLowerCase();
++  // host 直接参与 URL 拼接，先卡字符集，挡掉垃圾/注入值（含 IPv6 的方括号形态）
++  if (!/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?::\d+)?$|^localhost(?::\d+)?$|^127\.0\.0\.1(?::\d+)?$|^\[[0-9a-f:]+\](?::\d+)?$/.test(host)) {
++    return '';
++  }
++  const isLocal = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::|$)/.test(host);
++  const xfp = String(req.get('x-forwarded-proto') || '').split(',')[0].trim();
++  // 公网访问时 req.protocol 是反代转进来的 http，不能拿来当真 ——
++  // 只有 X-Forwarded-Proto 明说 http 才是 http，其余一律 https（站点已开 HSTS）
++  const proto = isLocal
++    ? xfp || String(req.protocol || '').trim() || 'http'
++    : xfp === 'http' ? 'http' : 'https';
++  return `${proto}://${host}/feishu/callback`;
++}
++
++/**
++ * 实际生效的回调地址。优先级：config.json 里显式配的 > 按当前访问地址推导 > 常量兜底。
++ * 「显式配置优先」保证了特殊部署（子路径、独立回调域名）仍可覆盖，
++ * 推导只填「没配」这一格，不抢配置的决定权。
++ *
++ * 唯一的例外：**配成了 localhost、这次却是从别处访问的** —— 手机上根本没有那个
++ * 3000 端口，这条配置在 App 里就是条死路。此时按当前访问地址重算，
++ * 省掉「发现授权失败 → 猜到是地址问题 → 去页面改配置」这一整圈。
++ * 反过来，用 localhost 访问时（本地开发）它仍然原样生效。
++ *
++ * @param {import('express').Request} [req] 有就传，推导才准确
++ */
++function getRedirect(req) {
++  const g = group('feishu') || {};
++  const stored = String(g.redirectUri == null ? '' : g.redirectUri).trim();
++  if (stored) {
++    const localConfig = /^http:\/\/(?:localhost|127\.0\.0\.1)(?::|$)/i.test(stored);
++    if (!localConfig || isLocalRequest(req)) return stored;
++  }
++  return deriveRedirect(req) || DEFAULT_REDIRECT;
++}
++
++/** 这次访问是不是就发生在服务本机（浏览器直开 localhost） */
++function isLocalRequest(req) {
++  if (!req || typeof req.get !== 'function') return false;
++  const host = String(req.get('host') || '').split(',')[0].trim().toLowerCase();
++  return /^(?:localhost|127\.0\.0\.1|\[::1\])(?::|$)/.test(host);
++}
++
+ module.exports = {
+   CONFIG_FILE,
+   GROUPS,
+@@ -242,4 +308,5 @@ module.exports = {
+   save,
+   reset,
+   maskValue,
++  getRedirect,
+ };
+diff --git a/server/feishu.js b/server/feishu.js
+index f220b2c..e4562bb 100644
+--- a/server/feishu.js
++++ b/server/feishu.js
+@@ -7,7 +7,9 @@
+  * 用户在群里、能看到的历史消息，用 user_access_token 就能读到。
+  *
+  * 流程：GET /feishu/auth → 飞书授权页 → 回调 /feishu/callback → 存 token → 拉群消息
+- * 回调地址可用 localhost，重定向发生在浏览器端，不需要公网域名。
++ * 回调地址默认按「当前访问地址」推导：浏览器里访问就是 localhost，App / 公网访问
++ * 就是 https 域名（见 config.js 的 getRedirect）。显式配置优先。
++ * 换域名后记得把新地址同步进飞书开放平台的重定向白名单，否则报 20029。
+  *
+  * 令牌的读写与续期统一由 server/feishu_token.js 负责（定时脚本也要复用）。
+  */
+@@ -77,7 +79,7 @@ router.get('/feishu/auth', (req, res) => {
+   const params = new URLSearchParams({
+     client_id: getAppId(),
+     response_type: 'code',
+-    redirect_uri: getRedirect(),
++    redirect_uri: getRedirect(req),
+     scope: getScope(),
+     state,
+   });
+@@ -135,7 +137,7 @@ router.get('/feishu/callback', async (req, res) => {
+ 
+ router.get('/api/feishu/check-redirect', (req, res) => {
+   const input = String(req.query.uri || '').trim();
+-  const want = parseURI(getRedirect());
++  const want = parseURI(getRedirect(req));
+   const got = parseURI(input);
+   const diffs = [];
+ 
+@@ -168,7 +170,7 @@ router.get('/api/feishu/check-redirect', (req, res) => {
+     }
+   }
+ 
+-  res.json({ expected: getRedirect(), input, match: diffs.length === 0, diffs });
++  res.json({ expected: getRedirect(req), input, match: diffs.length === 0, diffs });
+ });
+ 
+ router.get('/api/feishu/status', async (req, res) => {
+@@ -176,7 +178,7 @@ router.get('/api/feishu/status', async (req, res) => {
+   res.json({
+     configured: hasCred(),
+     authorized: !!t,
+-    redirectUri: getRedirect(),
++    redirectUri: getRedirect(req),
+     scope: getScope(),
+     chatId: getChatId(),
+     authUrl: '/feishu/auth',
+diff --git a/server/feishu_token.js b/server/feishu_token.js
+index 90aead3..974326e 100644
+--- a/server/feishu_token.js
++++ b/server/feishu_token.js
+@@ -139,7 +139,9 @@ module.exports = {
+   CRED_HINT,
+   cred,
+   getAppId: () => cred().appId,
+-  getRedirect: () => cred().redirectUri || config.DEFAULT_REDIRECT,
++  // 回调地址能感知「当前用哪个域名在访问」：显式配置 > 按请求推导 > 常量兜底。
++  // 调用方（OAuth 路由）务必把 req 传进来，否则 App 里会拿到写死的 localhost
++  getRedirect: (req) => config.getRedirect(req),
+   // scope 不来自配置文件，是写死的常量 —— 见 config.js 里 DEFAULT_SCOPE 的说明
+   getScope: () => config.DEFAULT_SCOPE,
+   getChatId: () => cred().chatId || config.DEFAULT_CHAT_ID,

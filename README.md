@@ -164,14 +164,16 @@ python scripts/gen-icons.py 原图.png --assets mobile/resources
   却会把 WindowInsets 提前消耗掉，导致 WebView 读到的 top inset 变成 0。
 - **深色模式**：华为会对 WebView 做算法强制反色，原生端 `FORCE_DARK_OFF`
   加上页面自身声明 `color-scheme: dark`，两端都堵住才稳。
-- **滚动流畅度**：站点在中低端机上会掉帧，三处开销叠出来的，`injectPerfTweaks()` 逐个拆：
-  `body` 的 `background-attachment: fixed`（每帧重画底层，改随内容滚；壁纸另有 fixed 层兜着）、
-  `.topbar` 与 `.panel` 上的 `backdrop-filter: blur(14px)`（sticky + 毛玻璃每帧重取背景做模糊，
-  **这是主因**）、以及没提成合成层的 `.wallpaper`。
-  毛玻璃按下述策略降级：滚动时挂 `body.wc-scrolling` 关掉 blur（用同等半透明替代），
-  停手 160ms 再恢复 —— 动的过程全程流畅，停下来看到的仍是原毛玻璃。
-  原生侧另有 `WebView.setRendererPriorityPolicy(RENDERER_PRIORITY_IMPORTANT, false)`（API 26+），
-  免得系统内存吃紧时先把渲染进程降优先级，表现是滚着突然卡一拍。
+- **滚动流畅度**：真正吃帧的是站点那层毛玻璃 —— `.topbar`（sticky）和一屏好几个 `.panel`
+  上都挂着 `backdrop-filter: blur(14px)`，sticky + 模糊意味着每帧要重新取背景做一次模糊。
+  App 侧能做的两件事：
+  `setRendererPriorityPolicy(RENDERER_PRIORITY_IMPORTANT)`（API 26+，系统内存吃紧时
+  别先拿渲染进程开刀，否则滚着突然卡一拍），以及注入 `overscroll-behavior: none` 消掉橡皮筋。
+  ⚠️ **不要用「滚动时切 CSS class 降级毛玻璃」的办法**：v1.0.6 试过，确实省了 GPU，
+  但每次起停都要重算图层 + 重绘，连续滚动时肉眼就是一阵闪 —— 省下的帧抵不上闪一下的观感损失，已撤。
+  要解决根子上的开销，得改站点：把 blur 半径降下来，或者给窄屏单独一套无模糊样式。
+- **页面侧补丁来源**：`overscroll-behavior` 与 `color-scheme: dark` 取自早前分支里的
+  `web-updates.patch`（那套站点补丁尚未合进上游，见下一节）。
 - **滚动边缘拉伸**：`setOverScrollMode(OVER_SCROLL_NEVER)` 关掉了 Android 12+ 的拉伸反馈动画。
 - **飞书授权**：回调地址由服务端按访问域名推导，需要把
   `https://<域名>/feishu/callback` 加进飞书开放平台的重定向白名单，否则报 20029。
@@ -232,3 +234,21 @@ python scripts/gen-icons.py 原图.png --assets mobile/resources
 - 鸿蒙 NEXT 包（`mobile/harmony` ArkTS 工程，取决于目标机型）
 - 配置签名的四个 Secrets（`KEYSTORE_B64` 等）—— 目前出的是 CI 临时密钥签的包，
   正式分发前需要换成固定证书，否则版本之间无法覆盖升级
+
+## 站点侧待办（App 解决不了，得改站点）
+
+早前分支留下一份站点补丁，已存档到 `docs/web-updates.patch`。
+**核对过上游 `AidanAllen/workcheck`，这些改动一条都没合进去**：
+
+| 补丁里的改动 | 影响 | App 侧能否补 |
+|---|---|---|
+| `app.js` SSE 重连（`visibilitychange`/`pageshow`/`online` 时重建 `EventSource`） | **App 切后台再回来，日志流标志还写着「已连接」其实已经冻死**，看不见新日志也不报错 | 补不了：实例在站点闭包内部，Shell 拿不到句柄。只能整页 reload，代价太大 |
+| `config.js` / `feishu.js` 回调地址按当前访问域名推导 | **App 里点「飞书授权」会失败** —— 回调写死 `http://localhost:3000`，手机上没有那个端口，授权链路断死 | 补不了：地址由服务端拼，只有改站点 |
+| `view` 加 `viewport-fit=cover` | 关系到 `env(safe-area-inset-*)` 在 WebView 里是否有值（现在靠原生注入兜底） | 注入时机太晚，改 meta 无效，不建议在这绕 |
+| `style.css` 加 `color-scheme: dark` | 表单控件在深色页上冒白底 | **已在 App 侧注入补上** |
+| `style.css` 加 `overscroll-behavior: none` | 滚到头的橡皮筋 | **已在 App 侧注入补上**（原生也关了 over-scroll） |
+| `scripts/test-redirect.js` | 回调推导规则的单测 | — |
+
+前两项是 App 里**只靠 Shell 拿不到**的功能缺陷，建议按补丁直接改进站点仓库。
+改动合进去之后，注入 `color-scheme` 与 `overscroll-behavior` 这两条也就可以一并撤掉，
+让这些事回到站点自己的 CSS 里。

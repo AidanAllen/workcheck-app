@@ -36,6 +36,9 @@ local.properties
 
 # 给网页端仓库用的改动补丁，不属于本仓库
 *.patch
+# 例外：docs/ 下的是 App 侧的配套文档 —— 记录「哪些问题只能改站点」及其补丁，
+# 属于本仓库，单独放行（上面那条是为了挡住手滑打出来的临时 diff）
+!docs/*.patch
 
 # Python 产物（scripts/gen-icons.py）
 __pycache__/

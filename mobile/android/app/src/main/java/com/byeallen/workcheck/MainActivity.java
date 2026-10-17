@@ -225,35 +225,26 @@ public class MainActivity extends BridgeActivity {
     }
 
     /**
-     * 滚动流畅度。站点在 WebView 里慢，主要是三样东西叠在一起：
-     *   1. body 的 background-attachment: fixed —— 固定背景每滚动一帧都要重画一遍底层
-     *   2. .topbar（sticky）与 .panel（一屏好几个）上的 backdrop-filter: blur(14px)
-     *      sticky + 毛玻璃意味着每帧都要重新取背景做一次模糊，是中低端机掉帧的主因
-     *   3. .wallpaper 是 position: fixed 的满屏层，没提成合成层时会跟着重画
-     * 处理：
-     *   固定背景改随内容滚（壁纸本来就有单独的 fixed 层，氛围光跟着滚没违和感）
-     *   壁纸层提升为自己那一层
-     *   滚动过程中先把毛玻璃降级成同等半透明，停手 160ms 后恢复 ——
-     *   这样动起来是全程流畅的，停下来看到的还是原来的毛玻璃。
+     * 页面侧补几件静态的小事，以及为什么这里**不再做滚动期降级**：
+     *   站点毛玻璃（.topbar 与一屏好几个 .panel 上的 backdrop-filter: blur(14px)）
+     *   是中低端机掉帧的主因，v1.0.6 曾用「滚动时给 body 挂 wc-scrolling 关掉 blur、
+     *   停手 160ms 恢复」来省这笔开销 —— 结果是每次起停都要重算图层 + 重绘，
+     *   连续滚动时肉眼就是一阵闪。省下来的帧远抵不上闪一下的观感损失，整套撤掉。
+     *   只留下不会引起状态切换的静态项，性能收益交给原生侧的渲染进程优先级。
+     *
+     * 留下来的两条都是从 web-updates.patch 里挑的（那套站点补丁还没合进上游）：
+     *   overscroll-behavior: none —— 滚到头别起橡皮筋/下拉刷新，本身也消除一点抖动
+     *   color-scheme: dark —— 站点没声明，表单控件会忽然冒一块白底；
+     *                         原生侧的 FORCE_DARK_OFF 只管得住 ROM 的算法反色
      */
     private void injectPerfTweaks(WebView view) {
         final String js =
             "(function(){try{"
             + "if(window.__wcPerf)return;window.__wcPerf=1;"
             + "var st=document.createElement('style');st.id='app-perf';"
-            + "st.textContent='body{background-attachment:scroll !important}'"
-            + "+'.wallpaper{will-change:transform;transform:translateZ(0)}'"
-            + "+'.wc-scrolling .topbar,.wc-scrolling .panel{"
-            + "-webkit-backdrop-filter:none !important;backdrop-filter:none !important}'"
-            + "+'.wc-scrolling .topbar{background-color:var(--bg) !important}';"
+            + "st.textContent='html,body{overscroll-behavior:none}'"
+            + "+':root{color-scheme:dark}';"
             + "(document.head||document.documentElement).appendChild(st);"
-            + "var t=null;"
-            + "window.addEventListener('scroll',function(){"
-            + "var b=document.body;if(!b)return;"
-            + "if(!b.classList.contains('wc-scrolling'))b.classList.add('wc-scrolling');"
-            + "if(t)clearTimeout(t);"
-            + "t=setTimeout(function(){b.classList.remove('wc-scrolling')},160);"
-            + "},{passive:true});"
             + "}catch(e){}})();";
         view.evaluateJavascript(js, null);
     }
