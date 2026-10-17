@@ -427,4 +427,3 @@ python scripts/gen-icons.py 原图.png --assets mobile/resources
 - 替换启动图（现为 Capacitor 默认图）
 - 鸿蒙 NEXT 包（`mobile/harmony` ArkTS 工程，取决于目标机型）—— 尚未开始
 - 站点侧两项缺陷待按 `docs/web-updates.patch` 改进（飞书回调、SSE 重连）
-- 处理历史 tag `v2.0.1`（versionCode 与本版冲突，可能造成降级误判）
