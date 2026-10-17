@@ -50,6 +50,9 @@ App **不写死任何站点地址**。首次启动会落在本地配置页（`ww
 - 地址填错会落到内置错误页，上面有「换个地址」回到配置页 —— 走 `https://localhost/#setup`，
   带 `#setup` 才停在填写表单上，否则会被自动跳走
 - 导航白名单只放行「用户填的那个站点 + 飞书两个域（`feishu.cn` / `larksuite.com`）」，其余一律交系统浏览器
+- **左下角齿轮 = 重新配置地址**：每次进站点页会露出来，2 秒后淡出。
+  直达站点之后没有中转页可退，这是唯一能回头改地址的入口；
+  每次页面加载都会重露一次，不存在藏深了找不着的情况
 
 这样同一个 APK 可以分发给不同的人，各自连到自己的站点。
 想彻底重来一次的话，清除 App 数据即可回到配置页。
@@ -136,12 +139,21 @@ python scripts/gen-icons.py 原图.png --assets mobile/resources
   不用 `!important` 压不住。
 - **滚动遮挡**：站点的 `.topbar` 是 `position: sticky; top: 0`，吸的是 WebView 视口顶
   （= 屏幕物理顶），沉浸后滚动时标题会和状态栏重叠。`injectPageTweaks()` 给它垫高：
-  `padding-top: calc(var(--app-safe-top, 0px) + 14px)`，毛玻璃背景顺便成了状态栏的背景，
+  `padding-top: calc(var(--app-safe-top, 0px) + 6px)`，毛玻璃背景顺便成了状态栏的背景，
   滚上去的内容从它后面过会被 `backdrop-filter` 模糊掉。
+  站点原本的上下边距是 14px，这里只再加 6px —— 垫多了标题会离状态栏太远。
+- **登录态**（重要）：站点发的是 `wc_session` Cookie（`Max-Age` 7 天、`HttpOnly`、`SameSite=Lax`），
+  本身是持久 Cookie，但 WebView 把它写进自己的 SQLite 是**异步**的 ——
+  从最近任务划掉 App 时常常还没落盘，下次进来就成了未登录。所以做了两道保险：
+  `onPause()` 里先 `CookieManager.flush()`，再把这枚 Cookie 抄一份进 SharedPreferences；
+  `onCreate()` 里先把快照喂回 WebView（记作持久 Cookie）再 `loadUrl`。
+  `CookieManager.getCookie()` 是原生侧读取，能读到 `HttpOnly`，所以备份这条路走得通。
+  登出 / 站点清 Cookie 时快照会一并删掉，否则下次会把失效凭证塞回去，卡在「已登录但 401」。
 - **顶部避让**：沉浸之后内容会跑到状态栏底下，避让靠 `injectPageTweaks()`：
   页面加载完注入 `--app-safe-top` / `--app-safe-bottom`（原生量出来的真实高度，单位 CSS px）；
   再探测一次 `env(safe-area-inset-top)`，WebView 老内核恒为 0，此时补一层透明 `border` 把内容顶下去
   （用 border 而非 padding，不会顶掉页面原有的 padding，背景图也照样画满状态栏那一条）。
+  两者都非零时**取较小的那个**：理论上都等于状态栏高度，谁偏大通常是把刘海区一起算进去了。
   远程页面有固定顶栏的话，直接在页面里用 `var(--app-safe-top)` 比 `env()` 可靠。
   ⚠️ **避让只能做一次**：页面 `env()` 与原生注入同时生效，顶部会出现两条空白，
   看着比黑条更糟（v1.0.2 就栽在这）。所以注入前先探测，`env()` 有值就收手。

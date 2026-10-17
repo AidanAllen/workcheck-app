@@ -4,12 +4,16 @@ import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.TypedValue;
+import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.Window;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
@@ -17,6 +21,8 @@ import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+import android.widget.FrameLayout;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.core.graphics.Insets;
@@ -40,6 +46,14 @@ public class MainActivity extends BridgeActivity {
 
     private static final String PREFS = "workcheck";
     private static final String PREF_SITE = "siteUrl";
+    /** 登录凭证的最后一次快照。见 persistSessionCookie() 的说明。 */
+    private static final String PREF_COOKIE = "sessionCookie";
+
+    /** 会话 Cookie 名，与站点 server/index.js 的 SESSION_COOKIE 保持一致。 */
+    private static final String SESSION_COOKIE = "wc_session";
+
+    /** 凭证快照的有效期，跟站点的 SESSION_MAX_AGE（7 天）对齐。 */
+    private static final int SESSION_MAX_AGE_SEC = 7 * 24 * 60 * 60;
 
     /** 无论用户填的是什么站点，这几个域都放行。
         飞书那两个必须放行：授权页一旦被甩到外部浏览器，回调就再也回不到 App 里。 */
@@ -73,6 +87,20 @@ public class MainActivity extends BridgeActivity {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private boolean backPressedOnce = false;
 
+    /** 左下角那个「换/改站点地址」的圆形齿轮。默认藏着，每次进页面才露两秒。 */
+    private TextView fabSettings;
+    private final Runnable fabHide = new Runnable() {
+        @Override
+        public void run() {
+            if (fabSettings == null) return;
+            fabSettings.animate().alpha(0f).setDuration(350)
+                .withEndAction(() -> {
+                    fabSettings.setVisibility(View.GONE);
+                    fabSettings.setClickable(false);
+                }).start();
+        }
+    };
+
     /** 已保存的站点地址，结尾带 /。空串 = 还没配置过。 */
     private String siteUrl = "";
 
@@ -86,10 +114,13 @@ public class MainActivity extends BridgeActivity {
         siteUrl = getSharedPreferences(PREFS, MODE_PRIVATE).getString(PREF_SITE, "");
         applyTransparentSystemBars();
         tuneWebView();
-        // 已经配过站点：直接 loadUrl 顶掉 Capacitor 刚发起的本地页加载，
-        // 一启动就是看板本身，不再经过「看板娘」中转页（那一版要干等 1.5 秒才跳）。
-        // 没配过就留在本地配置页（www/index.html）让使用者填地址。
+        setupSettingsFab();
+        // 已经配过站点：一启动就 loadUrl 直达看板，顶掉 Capacitor 刚发起的本地页加载
+        // （那一版要经过中转页干等 1.5 秒才跳）。没配过就留在本地配置页填地址。
+        // 补 Cookie 必须排在 loadUrl 前面：顺序反了首屏会先按未登录渲染一遍，
+        // 然后再纠回来，看着像登录失效又自己恢复了。
         if (!siteUrl.isEmpty()) {
+            restoreSessionCookie();
             loadSite(siteUrl);
         }
     }
@@ -163,16 +194,22 @@ public class MainActivity extends BridgeActivity {
             + "r.style.backgroundAttachment=b.backgroundAttachment}"
             // 顶栏「↺ 默认排序」：手机上看板不做拖拽排序，留着只是占地方。
             // 它是 JS 按排序状态切换 hidden 属性的，用 !important 才压得住。
+            // 同时给 sticky 的 .topbar 垫高状态栏：它吸的是 WebView 视口顶（= 屏幕物理顶），
+            // 不垫的话滚动后标题和状态栏重叠。垫完后毛玻璃背景正好充当状态栏底色。
+            // 站点自己的 padding-top 是 14px，这里只加 6px —— 再宽标题就离状态栏太远了。
             + "if(!document.getElementById('app-page-tweaks')){"
             + "var t=document.createElement('style');t.id='app-page-tweaks';"
             + "t.textContent='#resetOrder,button[title*=\"\\u9ed8\\u8ba4\\u6392\\u5e8f\"]{display:none !important}"
-            + ".topbar{padding-top:calc(var(--app-safe-top,0px) + 14px) !important}';"
+            + ".topbar{padding-top:calc(var(--app-safe-top,0px) + 6px) !important}';"
             + "(document.head||r).appendChild(t)}"
             + "var p=document.createElement('div');"
             + "p.style.cssText='position:absolute;left:0;top:0;width:0;height:0;"
             + "padding-top:env(safe-area-inset-top);visibility:hidden;pointer-events:none';"
             + "r.appendChild(p);"
             + "var v=parseFloat(window.getComputedStyle(p).paddingTop)||0;p.remove();"
+            // WebView 自己也报了一个 top inset：取它和原生读数里较小的那个。
+            // 两者理论上都等于状态栏高度，谁偏大就是谁把别的东西（刘海区之类）算进去了。
+            + "if(v>0&&v<T){T=v;r.style.setProperty('--app-safe-top',T+'px');}"
             + "if(v>0)return;"                     // WebView 自己报对了，页面会按它避让，别重复加
             + "if(document.getElementById('app-safe-fallback'))return;"
             // 有 sticky 顶栏的页面顶部已由 .topbar 垫高，再加 border-top 会双重
@@ -250,6 +287,123 @@ public class MainActivity extends BridgeActivity {
         backPressedOnce = true;
         Toast.makeText(this, "再按一次退出", Toast.LENGTH_SHORT).show();
         mainHandler.postDelayed(() -> backPressedOnce = false, 2000);
+    }
+
+    /* ------------------------------------------------------------- 登录凭证快照
+       站点登录后发的是 httpOnly Cookie（Max-Age 7 天），理论上是持久的，
+       但 WebView 把它写进自己的 SQLite 是异步的 —— 从最近任务划掉 App 时，
+       那一瞬间常常还没落盘，下次进来就变成未登录。所以两手准备：
+         退后台时：flush 一次，再顺手把这枚 Cookie 抄一份进 SharedPreferences
+         进 App 时：先把快照喂回 WebView，再 loadUrl
+       getCookie() 能读到 httpOnly（它是原生侧读的），所以这条备份走得通。 */
+
+    private void persistSessionCookie() {
+        CookieManager.getInstance().flush();   // 先把内存里的改动催到磁盘上
+        if (siteUrl.isEmpty()) return;
+        String raw = CookieManager.getInstance().getCookie(siteUrl);
+        String token = null;
+        if (raw != null) {
+            for (String part : raw.split(";")) {
+                String kv = part.trim();
+                if (kv.startsWith(SESSION_COOKIE + "=")) {
+                    token = kv;
+                    break;
+                }
+            }
+        }
+        SharedPreferences sp = getSharedPreferences(PREFS, MODE_PRIVATE);
+        if (token == null) {
+            // 登出过 / 站点清了 Cookie：快照必须跟着作废，
+            // 否则下次启动会把一枚已经失效的凭证又塞回去，页面永远停在「已登录但 401」。
+            sp.edit().remove(PREF_COOKIE).apply();
+            return;
+        }
+        sp.edit().putString(PREF_COOKIE, token).apply();
+    }
+
+    private void restoreSessionCookie() {
+        if (siteUrl.isEmpty()) return;
+        String token = getSharedPreferences(PREFS, MODE_PRIVATE).getString(PREF_COOKIE, "");
+        if (token.isEmpty()) return;
+        CookieManager cm = CookieManager.getInstance();
+        cm.setAcceptCookie(true);
+        // 补上属性，保证它是持久 Cookie 而不是会话 Cookie
+        cm.setCookie(siteUrl, token + "; Path=/; Max-Age=" + SESSION_MAX_AGE_SEC);
+        cm.flush();
+    }
+
+    @Override
+    protected void onPause() {
+        persistSessionCookie();
+        super.onPause();
+    }
+
+    /* --------------------------------------------------- 左下角「改地址」的齿轮 */
+
+    /**
+     * 直达站点之后就没有「切换站点」按钮了，地址写错只能卸 App。
+     * 补一个悬浮齿轮：进页面先露出来，2 秒后淡出，点到就回配置页重新填。
+     * 每次加载新站点页都会重新露一次 —— 不会永久沉底再也找不着。
+     */
+    private void setupSettingsFab() {
+        float d = getResources().getDisplayMetrics().density;
+        int size = Math.round(46 * d);
+
+        fabSettings = new TextView(this);
+        fabSettings.setText("⚙");
+        fabSettings.setGravity(Gravity.CENTER);
+        fabSettings.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+        fabSettings.setTextColor(0xCCFFFFFF);
+        fabSettings.setIncludeFontPadding(false);
+
+        GradientDrawable bg = new GradientDrawable();
+        bg.setShape(GradientDrawable.OVAL);
+        bg.setColor(0xCC2A1F26);                       // 和状态栏/顶栏同一套深玻璃色
+        bg.setStroke(Math.max(1, Math.round(d)), 0x33FFFFFF);
+        fabSettings.setBackground(bg);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            fabSettings.setElevation(6 * d);
+        }
+        fabSettings.setOnClickListener(v -> {
+            hideSettingsFabNow();
+            loadSite("https://localhost/#setup");      // #setup 让本地页停在表单上
+        });
+
+        FrameLayout.LayoutParams lp =
+            new FrameLayout.LayoutParams(size, size, Gravity.BOTTOM | Gravity.START);
+        lp.leftMargin = Math.round(14 * d);
+        lp.bottomMargin = Math.round(14 * d);
+        fabSettings.setVisibility(View.GONE);
+        // 挂在 DecorView 上而不是 WebView 里：网页怎么滚、怎么换都不受影响
+        ((ViewGroup) getWindow().getDecorView()).addView(fabSettings, lp);
+
+        // 手势导航时底 inset 是 0，三键导航得把按钮抬到导航栏上方
+        fabSettings.post(() -> {
+            readSystemBarInsets();
+            FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) fabSettings.getLayoutParams();
+            p.bottomMargin = Math.round((14 + safeBottomCssPx) * getResources().getDisplayMetrics().density);
+            fabSettings.setLayoutParams(p);
+        });
+    }
+
+    /** 露出来，并从 2 秒重新开始倒计时。 */
+    private void flashSettingsFab() {
+        if (fabSettings == null) return;
+        mainHandler.removeCallbacks(fabHide);
+        fabSettings.animate().cancel();
+        fabSettings.setAlpha(1f);
+        fabSettings.setVisibility(View.VISIBLE);
+        fabSettings.setClickable(true);
+        mainHandler.postDelayed(fabHide, 2000);
+    }
+
+    private void hideSettingsFabNow() {
+        mainHandler.removeCallbacks(fabHide);
+        if (fabSettings == null) return;
+        fabSettings.animate().cancel();
+        fabSettings.setAlpha(0f);
+        fabSettings.setVisibility(View.GONE);
+        fabSettings.setClickable(false);
     }
 
     /** 本地配置页（www/index.html）是哪个 URL：取决于 androidScheme，一般是 https://localhost/ */
@@ -390,6 +544,10 @@ public class MainActivity extends BridgeActivity {
         public void onPageFinished(WebView view, String url) {
             super.onPageFinished(view, url);
             injectPageTweaks(view);
+            // 配置页自己就有表单，不用再挂齿轮；站点页（含加载失败的兜底页）才露
+            if (url != null && !isLocalPage(Uri.parse(url))) {
+                flashSettingsFab();
+            }
         }
 
         @Override
