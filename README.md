@@ -134,6 +134,10 @@ python scripts/gen-icons.py 原图.png --assets mobile/resources
 - **顶栏「↺ 默认排序」**：手机上看板不做拖拽排序，`injectPageTweaks()` 注入
   `#resetOrder{display:none !important}` 藏掉。它由页面 JS 按排序状态切 `hidden` 属性，
   不用 `!important` 压不住。
+- **滚动遮挡**：站点的 `.topbar` 是 `position: sticky; top: 0`，吸的是 WebView 视口顶
+  （= 屏幕物理顶），沉浸后滚动时标题会和状态栏重叠。`injectPageTweaks()` 给它垫高：
+  `padding-top: calc(var(--app-safe-top, 0px) + 14px)`，毛玻璃背景顺便成了状态栏的背景，
+  滚上去的内容从它后面过会被 `backdrop-filter` 模糊掉。
 - **顶部避让**：沉浸之后内容会跑到状态栏底下，避让靠 `injectPageTweaks()`：
   页面加载完注入 `--app-safe-top` / `--app-safe-bottom`（原生量出来的真实高度，单位 CSS px）；
   再探测一次 `env(safe-area-inset-top)`，WebView 老内核恒为 0，此时补一层透明 `border` 把内容顶下去

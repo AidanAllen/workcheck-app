@@ -139,10 +139,13 @@ public class MainActivity extends BridgeActivity {
      *   1. 挂上 --app-safe-top / --app-safe-bottom，页面想用直接用（比 env() 可靠）
      *   2. html 自己没背景图、body 有的话，把背景图同步到 html —— 保证状态栏那一条
      *      画的是页面那张背景图，而不是 WebView 的默认底色
-     *   3. 隐藏顶栏的「↺ 默认排序」按钮（手机上看板上用不到，还原排序在网页端做）
-     *   4. 探测 env(safe-area-inset-top) 是不是真的有值；没有就补一层透明 border 把内容顶下去
-     *      —— 用 border 而不是 padding，既不会顶掉页面原有的 padding，
-     *         背景图（background-clip 默认 border-box）也照样画满状态栏那一条。
+     *   3. 隐藏顶栏的「↺ 默认排序」按钮；并给 sticky 的 .topbar 垫高状态栏 ——
+     *      它吸的是 WebView 视口顶（= 屏幕物理顶），不垫的话滚动后标题和状态栏重叠。
+     *      垫高后毛玻璃背景正好盖住状态栏区域，滚上去的内容从它后面过会被模糊掉。
+     *   4. 没有 sticky 顶栏的页面，才补一层透明 border 把内容顶下去 ——
+     *      用 border 而不是 padding，不会顶掉页面原有的 padding，
+     *      背景图（background-clip 默认 border-box）也照样画满状态栏那一条。
+     *      有 .topbar 的页面不能再加 border-top：topbar 吸顶后自己已经垫高，加了会双重。
      */
     private void injectPageTweaks(WebView view) {
         readSystemBarInsets();
@@ -162,7 +165,8 @@ public class MainActivity extends BridgeActivity {
             // 它是 JS 按排序状态切换 hidden 属性的，用 !important 才压得住。
             + "if(!document.getElementById('app-page-tweaks')){"
             + "var t=document.createElement('style');t.id='app-page-tweaks';"
-            + "t.textContent='#resetOrder,button[title*=\"\\u9ed8\\u8ba4\\u6392\\u5e8f\"]{display:none !important}';"
+            + "t.textContent='#resetOrder,button[title*=\"\\u9ed8\\u8ba4\\u6392\\u5e8f\"]{display:none !important}"
+            + ".topbar{padding-top:calc(var(--app-safe-top,0px) + 14px) !important}';"
             + "(document.head||r).appendChild(t)}"
             + "var p=document.createElement('div');"
             + "p.style.cssText='position:absolute;left:0;top:0;width:0;height:0;"
@@ -171,9 +175,13 @@ public class MainActivity extends BridgeActivity {
             + "var v=parseFloat(window.getComputedStyle(p).paddingTop)||0;p.remove();"
             + "if(v>0)return;"                     // WebView 自己报对了，页面会按它避让，别重复加
             + "if(document.getElementById('app-safe-fallback'))return;"
-            + "var s=document.createElement('style');s.id='app-safe-fallback';"
-            + "s.textContent='body{border-top:'+T+'px solid transparent !important;"
+            // 有 sticky 顶栏的页面顶部已由 .topbar 垫高，再加 border-top 会双重
+            + "var rl='body{border-top:'+T+'px solid transparent !important;"
             + "border-bottom:'+B+'px solid transparent !important;box-sizing:border-box !important}';"
+            + "if(document.querySelector('.topbar'))"
+            + "rl='body{border-bottom:'+B+'px solid transparent !important;box-sizing:border-box !important}';"
+            + "var s=document.createElement('style');s.id='app-safe-fallback';"
+            + "s.textContent=rl;"
             + "(document.head||r).appendChild(s);"
             + "}catch(e){}})();";
         view.evaluateJavascript(js, null);
