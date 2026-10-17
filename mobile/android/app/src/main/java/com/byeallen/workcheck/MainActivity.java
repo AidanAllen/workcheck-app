@@ -10,7 +10,6 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -22,7 +21,7 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.widget.FrameLayout;
-import android.widget.TextView;
+import android.widget.ImageView;
 import android.widget.Toast;
 
 import androidx.core.graphics.Insets;
@@ -87,8 +86,9 @@ public class MainActivity extends BridgeActivity {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private boolean backPressedOnce = false;
 
-    /** 左下角那个「换/改站点地址」的圆形齿轮。默认藏着，每次进页面才露两秒。 */
-    private TextView fabSettings;
+    /** 左下角那个「换/改站点地址」的圆形齿轮。默认藏着，每次进页面才露 1 秒。 */
+    private ImageView fabSettings;
+    private GradientDrawable fabBg;
     private final Runnable fabHide = new Runnable() {
         @Override
         public void run() {
@@ -224,6 +224,40 @@ public class MainActivity extends BridgeActivity {
         view.evaluateJavascript(js, null);
     }
 
+    /**
+     * 滚动流畅度。站点在 WebView 里慢，主要是三样东西叠在一起：
+     *   1. body 的 background-attachment: fixed —— 固定背景每滚动一帧都要重画一遍底层
+     *   2. .topbar（sticky）与 .panel（一屏好几个）上的 backdrop-filter: blur(14px)
+     *      sticky + 毛玻璃意味着每帧都要重新取背景做一次模糊，是中低端机掉帧的主因
+     *   3. .wallpaper 是 position: fixed 的满屏层，没提成合成层时会跟着重画
+     * 处理：
+     *   固定背景改随内容滚（壁纸本来就有单独的 fixed 层，氛围光跟着滚没违和感）
+     *   壁纸层提升为自己那一层
+     *   滚动过程中先把毛玻璃降级成同等半透明，停手 160ms 后恢复 ——
+     *   这样动起来是全程流畅的，停下来看到的还是原来的毛玻璃。
+     */
+    private void injectPerfTweaks(WebView view) {
+        final String js =
+            "(function(){try{"
+            + "if(window.__wcPerf)return;window.__wcPerf=1;"
+            + "var st=document.createElement('style');st.id='app-perf';"
+            + "st.textContent='body{background-attachment:scroll !important}'"
+            + "+'.wallpaper{will-change:transform;transform:translateZ(0)}'"
+            + "+'.wc-scrolling .topbar,.wc-scrolling .panel{"
+            + "-webkit-backdrop-filter:none !important;backdrop-filter:none !important}'"
+            + "+'.wc-scrolling .topbar{background-color:var(--bg) !important}';"
+            + "(document.head||document.documentElement).appendChild(st);"
+            + "var t=null;"
+            + "window.addEventListener('scroll',function(){"
+            + "var b=document.body;if(!b)return;"
+            + "if(!b.classList.contains('wc-scrolling'))b.classList.add('wc-scrolling');"
+            + "if(t)clearTimeout(t);"
+            + "t=setTimeout(function(){b.classList.remove('wc-scrolling')},160);"
+            + "},{passive:true});"
+            + "}catch(e){}})();";
+        view.evaluateJavascript(js, null);
+    }
+
     private void tuneWebView() {
         Bridge bridge = getBridge();
         if (bridge == null) return;
@@ -267,6 +301,14 @@ public class MainActivity extends BridgeActivity {
 
         // 本地配置页靠这个拿到 / 保存站点地址
         webView.addJavascriptInterface(new SiteBridge(), "WorkCheckNative");
+        // 页面用它把当前主题色交回来，给左下角齿轮上色
+        webView.addJavascriptInterface(new StyleBridge(), "WorkCheckStyle");
+
+        // WebView 的渲染进程默认是「可牺牲」的：内存吃紧时系统会先降它的优先级，
+        // 表现就是滚着滚着突然卡一拍、严重时画面先白一下。设为 IMPORTANT 让它跟前台同位。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
+        }
 
         webView.setWebViewClient(new AppWebViewClient(bridge));
     }
@@ -343,25 +385,25 @@ public class MainActivity extends BridgeActivity {
 
     /**
      * 直达站点之后就没有「切换站点」按钮了，地址写错只能卸 App。
-     * 补一个悬浮齿轮：进页面先露出来，2 秒后淡出，点到就回配置页重新填。
+     * 补一个悬浮齿轮：进页面先露出来，1 秒后淡出，点到就回配置页重新填。
      * 每次加载新站点页都会重新露一次 —— 不会永久沉底再也找不着。
+     * 外观不写死：颜色由页面主题回传（见 StyleBridge），换肤会跟着变。
      */
     private void setupSettingsFab() {
         float d = getResources().getDisplayMetrics().density;
-        int size = Math.round(46 * d);
+        int size = Math.round(44 * d);
 
-        fabSettings = new TextView(this);
-        fabSettings.setText("⚙");
-        fabSettings.setGravity(Gravity.CENTER);
-        fabSettings.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
-        fabSettings.setTextColor(0xCCFFFFFF);
-        fabSettings.setIncludeFontPadding(false);
+        fabBg = new GradientDrawable();
+        fabBg.setShape(GradientDrawable.OVAL);
+        fabBg.setColor(Color.parseColor("#332620"));                    // 缺省色，会被页面主题覆盖
+        fabBg.setStroke(Math.max(1, Math.round(d)), Color.parseColor("#33FFBED2"));
 
-        GradientDrawable bg = new GradientDrawable();
-        bg.setShape(GradientDrawable.OVAL);
-        bg.setColor(0xCC2A1F26);                       // 和状态栏/顶栏同一套深玻璃色
-        bg.setStroke(Math.max(1, Math.round(d)), 0x33FFFFFF);
-        fabSettings.setBackground(bg);
+        fabSettings = new ImageView(this);
+        fabSettings.setImageResource(R.drawable.ic_settings);
+        fabSettings.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        fabSettings.setPadding(Math.round(10 * d), Math.round(10 * d),
+            Math.round(10 * d), Math.round(10 * d));
+        fabSettings.setBackground(fabBg);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             fabSettings.setElevation(6 * d);
         }
@@ -387,15 +429,96 @@ public class MainActivity extends BridgeActivity {
         });
     }
 
-    /** 露出来，并从 2 秒重新开始倒计时。 */
+    /** 露出来，并从 1 秒重新开始倒计时。同时按页面当前主题重新上一次色。 */
     private void flashSettingsFab() {
         if (fabSettings == null) return;
         mainHandler.removeCallbacks(fabHide);
+        mainHandler.removeCallbacks(fabThemeRun);
         fabSettings.animate().cancel();
         fabSettings.setAlpha(1f);
         fabSettings.setVisibility(View.VISIBLE);
         fabSettings.setClickable(true);
-        mainHandler.postDelayed(fabHide, 2000);
+        // 站点配色是运行时按 localStorage 里的偏好挂主题的，晚一点读才读得到切换后的值
+        mainHandler.postDelayed(fabThemeRun, 500);
+        mainHandler.postDelayed(fabHide, 1000);
+    }
+
+    /** 延期执行（flashSettingsFab 用）：从页面把主题色取回来。 */
+    private final Runnable fabThemeRun = new Runnable() {
+        @Override
+        public void run() {
+            Bridge bridge = getBridge();
+            if (bridge != null) fetchPageTheme(bridge.getWebView());
+        }
+    };
+
+    /**
+     * 让页面把当前主题的几个变量交出来，齿轮照着上色 ——
+     * 站点有好几套皮肤（初樱 / 雨夜…），写死一个色必然跟其中几套打架。
+     */
+    private void fetchPageTheme(WebView view) {
+        final String js =
+            "(function(){try{"
+            + "if(typeof WorkCheckStyle==='undefined')return;"
+            + "var c=getComputedStyle(document.documentElement);"
+            + "function p(n){return (c.getPropertyValue(n)||'').trim()}"
+            + "WorkCheckStyle.applyTheme(p('--bg'),p('--surface'),p('--border'),p('--accent'),p('--text'));"
+            + "}catch(e){}})();";
+        view.evaluateJavascript(js, null);
+    }
+
+    /**
+     * 解析颜色。站点变量两种写法都出现过：#rrggbb 和 rgba(...)，
+     * 而 Color.parseColor 只认前者，rgba 得自己拆。
+     */
+    private static int parseColorLoose(String value, int fallback) {
+        if (value == null) return fallback;
+        String v = value.trim();
+        if (v.isEmpty()) return fallback;
+        if (v.startsWith("#")) {
+            try {
+                return Color.parseColor(v);
+            } catch (IllegalArgumentException ignored) {
+                return fallback;
+            }
+        }
+        // rgba(r, g, b[, a]) / rgb(r, g, b)
+        int open = v.indexOf('(');
+        int close = v.lastIndexOf(')');
+        if (open < 0 || close <= open) return fallback;
+        String[] parts = v.substring(open + 1, close).split(",");
+        if (parts.length < 3) return fallback;
+        try {
+            int r = clamp255(Integer.parseInt(parts[0].trim()));
+            int g = clamp255(Integer.parseInt(parts[1].trim()));
+            int b = clamp255(Integer.parseInt(parts[2].trim()));
+            int a = 255;
+            if (parts.length > 3) {
+                a = Math.round(Float.parseFloat(parts[3].trim()) * 255);
+            }
+            return Color.argb(clamp255(a), r, g, b);
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private static int clamp255(int v) {
+        return v < 0 ? 0 : (v > 255 ? 255 : v);
+    }
+
+    /** 按页面主题给齿轮上色：底取 --bg，描边取 --border，图标取 --accent。 */
+    private void applyFabTheme(String bg, String surface, String border, String accent, String text) {
+        if (fabBg == null || fabSettings == null) return;
+        int base = parseColorLoose(bg, Color.parseColor("#332620"));
+        int stroke = parseColorLoose(border, Color.parseColor("#33FFBED2"));
+        // 图标优先跟着主色（--accent）走，主题没给主色时才退回正文色
+        int tint = parseColorLoose(accent, parseColorLoose(text, Color.parseColor("#ff9fb9")));
+        // 底色本身偏深时给它加一点不透明度，压住底下的网页内容，别让字透上来打架
+        fabBg.setColor(Color.argb(0xE8, Color.red(base), Color.green(base), Color.blue(base)));
+        fabBg.setStroke(Math.max(1, Math.round(getResources().getDisplayMetrics().density)),
+            Color.argb(0x55, Color.red(stroke), Color.green(stroke), Color.blue(stroke)));
+        fabSettings.setColorFilter(tint);
+        fabSettings.invalidate();
     }
 
     private void hideSettingsFabNow() {
@@ -505,6 +628,19 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
+    /**
+     * 给页面用的第二座桥：把当前主题的配色变量交回来。
+     * 站点有多套皮肤，齿轮写死一个色必然跟其中几套打架。
+     */
+    private final class StyleBridge {
+
+        /** 运行在 WebView 的后台线程，改 UI 必须切回主线程。 */
+        @JavascriptInterface
+        public void applyTheme(String bg, String surface, String border, String accent, String text) {
+            mainHandler.post(() -> applyFabTheme(bg, surface, border, accent, text));
+        }
+    }
+
     private void loadSite(String url) {
         Bridge bridge = getBridge();
         if (bridge != null) {
@@ -545,6 +681,7 @@ public class MainActivity extends BridgeActivity {
         public void onPageFinished(WebView view, String url) {
             super.onPageFinished(view, url);
             injectPageTweaks(view);
+            injectPerfTweaks(view);
             // 配置页自己就有表单，不用再挂齿轮；站点页（含加载失败的兜底页）才露
             if (url != null && !isLocalPage(Uri.parse(url))) {
                 flashSettingsFab();

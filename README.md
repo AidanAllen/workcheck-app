@@ -50,9 +50,12 @@ App **不写死任何站点地址**。首次启动会落在本地配置页（`ww
 - 地址填错会落到内置错误页，上面有「换个地址」回到配置页 —— 走 `https://localhost/#setup`，
   带 `#setup` 才停在填写表单上，否则会被自动跳走
 - 导航白名单只放行「用户填的那个站点 + 飞书两个域（`feishu.cn` / `larksuite.com`）」，其余一律交系统浏览器
-- **左下角齿轮 = 重新配置地址**：每次进站点页会露出来，2 秒后淡出。
+- **左下角齿轮 = 重新配置地址**：每次进站点页会露出来（1 秒后淡出）。
   直达站点之后没有中转页可退，这是唯一能回头改地址的入口；
   每次页面加载都会重露一次，不存在藏深了找不着的情况
+- 齿轮的外观**由页面主题决定**：`StyleBridge` 让页面把 `--bg / --surface / --border / --accent / --text`
+  交回来（`injectPageTweaks` 之后延迟 500ms 取，避开站点运行时按 localStorage 换肤的时机），
+  原生据此给底色、描边、图标着色 —— 站点换皮肤它跟着换，不用改代码
 
 这样同一个 APK 可以分发给不同的人，各自连到自己的站点。
 想彻底重来一次的话，清除 App 数据即可回到配置页。
@@ -161,6 +164,14 @@ python scripts/gen-icons.py 原图.png --assets mobile/resources
   却会把 WindowInsets 提前消耗掉，导致 WebView 读到的 top inset 变成 0。
 - **深色模式**：华为会对 WebView 做算法强制反色，原生端 `FORCE_DARK_OFF`
   加上页面自身声明 `color-scheme: dark`，两端都堵住才稳。
+- **滚动流畅度**：站点在中低端机上会掉帧，三处开销叠出来的，`injectPerfTweaks()` 逐个拆：
+  `body` 的 `background-attachment: fixed`（每帧重画底层，改随内容滚；壁纸另有 fixed 层兜着）、
+  `.topbar` 与 `.panel` 上的 `backdrop-filter: blur(14px)`（sticky + 毛玻璃每帧重取背景做模糊，
+  **这是主因**）、以及没提成合成层的 `.wallpaper`。
+  毛玻璃按下述策略降级：滚动时挂 `body.wc-scrolling` 关掉 blur（用同等半透明替代），
+  停手 160ms 再恢复 —— 动的过程全程流畅，停下来看到的仍是原毛玻璃。
+  原生侧另有 `WebView.setRendererPriorityPolicy(RENDERER_PRIORITY_IMPORTANT, false)`（API 26+），
+  免得系统内存吃紧时先把渲染进程降优先级，表现是滚着突然卡一拍。
 - **滚动边缘拉伸**：`setOverScrollMode(OVER_SCROLL_NEVER)` 关掉了 Android 12+ 的拉伸反馈动画。
 - **飞书授权**：回调地址由服务端按访问域名推导，需要把
   `https://<域名>/feishu/callback` 加进飞书开放平台的重定向白名单，否则报 20029。
