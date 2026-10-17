@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- API 29 起有个坑：状态栏 / 导航条设成透明后，系统会为了保证图标看得见，
+         自动糊一层半透明遮罩 —— 那层灰看着就是「明明设了透明却还有一条」。
+         关掉它，图标明暗交给 MainActivity 自己控制。 -->
+    <style name="AppTheme" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:enforceStatusBarContrast">false</item>
+        <item name="android:enforceNavigationBarContrast">false</item>
+    </style>
+</resources>

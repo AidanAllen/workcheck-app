@@ -8,6 +8,13 @@
         <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
         <item name="colorAccent">@color/colorAccent</item>
         <item name="android:windowBackground">@color/splashBackground</item>
+
+        <!-- 系统栏透明：页面背景（含背景图）要一直顶到屏幕上沿。
+             MainActivity 里也会设一遍，这里先设是为了冷启动那一帧就别闪出黑条。 -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <!-- 页面是深底，图标用浅色 -->
+        <item name="android:windowLightStatusBar">false</item>
     </style>
 
     <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.NoActionBar">
@@ -19,5 +26,8 @@
     <!-- 冷启动那一瞬间的窗口：纯色底，比默认的品牌 splash 图干净，也不会白闪 -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@color/splashBackground</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>

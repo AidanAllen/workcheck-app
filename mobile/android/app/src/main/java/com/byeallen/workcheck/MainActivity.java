@@ -10,6 +10,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
+import android.view.Window;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebResourceError;
@@ -18,7 +19,10 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.widget.Toast;
 
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 
 import com.getcapacitor.Bridge;
@@ -30,7 +34,7 @@ import com.getcapacitor.BridgeWebViewClient;
  *   1. 站点地址不写死：首次启动先落在本地配置页，填完存起来，之后直接打开
  *   2. 把 WebView 调教成「能跑后台管理系统」的样子（Cookie、localStorage、不反色）
  *   3. 守住导航边界：自己的站点和飞书授权留在壳内，其它一律交系统浏览器
- *   4. 补上手机该有的手感：返回键、加载失败兜底页、状态栏配色
+ *   4. 补上手机该有的手感：返回键、加载失败兜底页、状态栏沉浸式
  */
 public class MainActivity extends BridgeActivity {
 
@@ -68,22 +72,94 @@ public class MainActivity extends BridgeActivity {
     /** 已保存的站点地址，结尾带 /。空串 = 还没配置过。 */
     private String siteUrl = "";
 
+    /** 系统栏高度，单位是 CSS px（= dp），给网页避让用。 */
+    private int safeTopCssPx = 0;
+    private int safeBottomCssPx = 0;
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         siteUrl = getSharedPreferences(PREFS, MODE_PRIVATE).getString(PREF_SITE, "");
-        // 页面是深色玻璃，状态栏图标用浅色才看得见（edge-to-edge 下 Android 15 靠这个控制）
-        WindowInsetsControllerCompat insets =
-            WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
-        insets.setAppearanceLightStatusBars(false);
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
-            getWindow().setStatusBarColor(Color.parseColor("#1d1519"));
-        }
-        // 只调状态栏配色，系统栏间距交给 CapacitorWebView 自带的 edge-to-edge 处理
-        // （配置里的 android.adjustMarginsForEdgeToEdge = force）。
-        // 这里千万别碰 WindowCompat.setDecorFitsSystemWindows：它在 Android 15 上已失效，
-        // 却会把 WindowInsets 提前消耗掉，导致 Capacitor 读到的 top inset 变成 0。
+        applyTransparentSystemBars();
         tuneWebView();
+    }
+
+    /**
+     * 状态栏 / 导航条整条透明，WebView 铺满整屏画到它们底下 —— 页面的背景（包括背景图）
+     * 才能一直顶到屏幕最上沿，和状态栏连成一片。
+     *
+     * 系统栏只吃颜色、不吃图片，所以「状态栏显示背景图」只能这么做：
+     * 透明 + 让网页自己顶上去，而不是给状态栏设一个色值。
+     * 这里千万别碰 WindowCompat.setDecorFitsSystemWindows：它在 Android 15 上已失效，
+     * 却会把 WindowInsets 提前消耗掉，导致 WebView 读到的 top inset 变成 0。
+     */
+    private void applyTransparentSystemBars() {
+        Window w = getWindow();
+        w.setStatusBarColor(Color.TRANSPARENT);
+        w.setNavigationBarColor(Color.TRANSPARENT);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // 透明之后系统会为保证图标看得见，自动糊一层半透明遮罩 ——
+            // 那层灰就是「明明设了透明、还是有一条」的元凶，关掉它。
+            w.setStatusBarContrastEnforced(false);
+            w.setNavigationBarContrastEnforced(false);
+        }
+        // 背景是深色玻璃 / 深底图，图标用浅色才看得见
+        WindowInsetsControllerCompat insets =
+            WindowCompat.getInsetsController(w, w.getDecorView());
+        insets.setAppearanceLightStatusBars(false);
+    }
+
+    /**
+     * 读一次系统栏的真实高度，换算成 CSS px 存起来。
+     * WebView 的 env(safe-area-inset-*) 只在「自己与系统栏重叠」且 Chromium 够新时才有值，
+     * 老内核恒为 0 —— 兜底注入要用这里的数。
+     */
+    private void readSystemBarInsets() {
+        WindowInsetsCompat wi = ViewCompat.getRootWindowInsets(getWindow().getDecorView());
+        if (wi == null) return;
+        Insets bars = wi.getInsets(
+            WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
+        float density = getResources().getDisplayMetrics().density;
+        safeTopCssPx = density > 0 ? Math.round(bars.top / density) : 0;
+        safeBottomCssPx = density > 0 ? Math.round(bars.bottom / density) : 0;
+    }
+
+    /**
+     * 页面加载完，把安全区尺寸交给网页。做三件事：
+     *   1. 挂上 --app-safe-top / --app-safe-bottom，页面想用直接用（比 env() 可靠）
+     *   2. html 自己没背景图、body 有的话，把背景图同步到 html —— 保证状态栏那一条
+     *      画的是页面那张背景图，而不是 WebView 的默认底色
+     *   3. 探测 env(safe-area-inset-top) 是不是真的有值；没有就补一层透明 border 把内容顶下去
+     *      —— 用 border 而不是 padding，既不会顶掉页面原有的 padding，
+     *         背景图（background-clip 默认 border-box）也照样画满状态栏那一条。
+     */
+    private void injectSafeArea(WebView view) {
+        readSystemBarInsets();
+        if (safeTopCssPx <= 0 && safeBottomCssPx <= 0) return;
+        final String js =
+            "(function(){try{"
+            + "var T=" + safeTopCssPx + ",B=" + safeBottomCssPx + ";"
+            + "var r=document.documentElement;if(!r)return;"
+            + "r.style.setProperty('--app-safe-top',T+'px');"
+            + "r.style.setProperty('--app-safe-bottom',B+'px');"
+            + "var h=getComputedStyle(r),b=document.body?getComputedStyle(document.body):null;"
+            + "if(b&&h.backgroundImage==='none'&&b.backgroundImage&&b.backgroundImage!=='none'){"
+            + "r.style.backgroundImage=b.backgroundImage;r.style.backgroundSize=b.backgroundSize;"
+            + "r.style.backgroundPosition=b.backgroundPosition;r.style.backgroundRepeat=b.backgroundRepeat;"
+            + "r.style.backgroundAttachment=b.backgroundAttachment}"
+            + "var p=document.createElement('div');"
+            + "p.style.cssText='position:absolute;left:0;top:0;width:0;height:0;"
+            + "padding-top:env(safe-area-inset-top);visibility:hidden;pointer-events:none';"
+            + "r.appendChild(p);"
+            + "var v=parseFloat(window.getComputedStyle(p).paddingTop)||0;p.remove();"
+            + "if(v>0)return;"                     // WebView 自己报对了，页面会按它避让，别重复加
+            + "if(document.getElementById('app-safe-fallback'))return;"
+            + "var s=document.createElement('style');s.id='app-safe-fallback';"
+            + "s.textContent='body{border-top:'+T+'px solid transparent !important;"
+            + "border-bottom:'+B+'px solid transparent !important;box-sizing:border-box !important}';"
+            + "(document.head||r).appendChild(s);"
+            + "}catch(e){}})();";
+        view.evaluateJavascript(js, null);
     }
 
     private void tuneWebView() {
@@ -112,6 +188,13 @@ public class MainActivity extends BridgeActivity {
         // Android 12 起滚到顶 / 滚到底会有一段把内容拉变形再弹回的动画（取代了老的边缘发光），
         // 在数据看板这种密排面板上看着像「抖了一下」。直接关掉过滚动。
         webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
+
+        // WebView 只在「自己跟系统栏重叠」时才把 safe-area 报给网页，而且老内核恒报 0。
+        // 这里原样返回 insets（不消费），让新内核能拿到完整的 systemBars / displayCutout 尺寸。
+        ViewCompat.setOnApplyWindowInsetsListener(webView, (v, windowInsets) -> {
+            readSystemBarInsets();
+            return windowInsets;
+        });
 
         // 首屏加载远程站点时 WebView 是空的，底色调成页面底色才不会白闪一下
         webView.setBackgroundColor(Color.parseColor("#1d1519"));
@@ -276,6 +359,12 @@ public class MainActivity extends BridgeActivity {
             }
             // capacitor://、file://、tel: 等交回 Capacitor 自己处理
             return super.shouldOverrideUrlLoading(view, request);
+        }
+
+        @Override
+        public void onPageFinished(WebView view, String url) {
+            super.onPageFinished(view, url);
+            injectSafeArea(view);
         }
 
         @Override

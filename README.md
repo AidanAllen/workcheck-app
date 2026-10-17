@@ -123,11 +123,20 @@ python scripts/gen-icons.py 原图.png --assets mobile/resources
 
 ## 已知适配要点
 
-- **状态栏**：`MainActivity` 里只调状态栏配色与图标明暗，系统栏间距交给
-  CapacitorWebView 自带的 edge-to-edge 处理（配置里的
-  `android.adjustMarginsForEdgeToEdge = force`）。
+- **状态栏（沉浸式）**：系统栏只吃颜色、不吃图片。要让页面背景（含背景图）顶到屏幕最上沿，
+  只能是「状态栏透明 + WebView 铺满整屏」——`MainActivity.applyTransparentSystemBars()`
+  把状态栏 / 导航条一起设成透明，配置里 `android.adjustMarginsForEdgeToEdge = disable`
+  让 Capacitor 不再给 WebView 加 margin（加了 margin 状态栏那一条就只剩窗口背景色，即黑条）。
+  API 29+ 还要关掉 `setStatusBarContrastEnforced`，否则系统为保证图标可见会自己糊一层半透明遮罩。
+- **顶部避让**：沉浸之后内容会跑到状态栏底下，避让靠 `injectSafeArea()`：
+  页面加载完注入 `--app-safe-top` / `--app-safe-bottom`（原生量出来的真实高度，单位 CSS px）；
+  再探测一次 `env(safe-area-inset-top)`，WebView 老内核恒为 0，此时补一层透明 `border` 把内容顶下去
+  （用 border 而非 padding，不会顶掉页面原有的 padding，背景图也照样画满状态栏那一条）。
+  远程页面有固定顶栏的话，直接在页面里用 `var(--app-safe-top)` 比 `env()` 可靠。
+  ⚠️ **避让只能做一次**：页面 `env()` 与原生注入同时生效，顶部会出现两条空白，
+  看着比黑条更糟（v1.0.2 就栽在这）。所以注入前先探测，`env()` 有值就收手。
   **不要碰 `WindowCompat.setDecorFitsSystemWindows`**：它在 Android 15 上已失效，
-  却会把 WindowInsets 提前消耗掉，导致 Capacitor 读到的 top inset 变成 0。
+  却会把 WindowInsets 提前消耗掉，导致 WebView 读到的 top inset 变成 0。
 - **深色模式**：华为会对 WebView 做算法强制反色，原生端 `FORCE_DARK_OFF`
   加上页面自身声明 `color-scheme: dark`，两端都堵住才稳。
 - **滚动边缘拉伸**：`setOverScrollMode(OVER_SCROLL_NEVER)` 关掉了 Android 12+ 的拉伸反馈动画。
