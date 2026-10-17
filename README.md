@@ -15,7 +15,7 @@ App **不写死任何站点地址** —— 实际地址由使用者首次启动�
 
 ## 目录
 
-- [当前版本](#当前版本)
+- [获取安装包](#获取安装包)
 - [装到手机上](#装到手机上)
 - [出包](#出包)
 - [签名](#签名)
@@ -32,26 +32,28 @@ App **不写死任何站点地址** —— 实际地址由使用者首次启动�
 
 ---
 
-## 当前版本
+## 获取安装包
 
-| 项 | 值 |
+最新正式版的 APK 在 GitHub Releases 上，取标记为 **Latest** 的那条：
+
+<https://github.com/AidanAllen/workcheck-app/releases/latest>
+
+版本号不在这个文档里维护 —— **写了就一定会过期**，用三处去查：
+
+| 想知道 | 看哪 |
 |---|---|
-| `versionName` / `versionCode` | `1.0.7` / `7` |
-| Release | [github.com/AidanAllen/workcheck-app/releases/tag/v1.0.7](https://github.com/AidanAllen/workcheck-app/releases/tag/v1.0.7) |
-| 附件 | `workcheck-v1.0.7.apk`（3,214,937 B） |
-| SHA256 | `c22b0b6a038ae3570b84ca5309ee9cd74a1ab05942416f5fe1ae774247bb15ff` |
+| 最新正式版是哪个 | Releases 页标记为 **Latest** 的那条 |
+| 工程里的版本 | `mobile/android/app/build.gradle` 的 `versionName` / `versionCode` |
+| 手机上装的是哪个 | 系统设置里的应用版本；服务端日志的 UA 也会带 `KanbanNiangApp/<version>` |
 
-`v1.0.1` ~ `v1.0.7` 全部由同一把正式密钥签名，**可直接覆盖安装，无需卸载**。
-
-> ⚠️ 仓库里有一个历史 tag `v2.0.1`，它的 `versionCode` 也是 **7**，与本版相同。
-> Android 按 versionCode 判断升降级 —— 装着 2.0.1 想换到 1.0.7 会被判为降级而拒绝安装。
-> 真撞上了，把 `versionCode` 提到 8 再出包即可。
+正式出包一律用同一把密钥、`versionCode` 递增 —— 这两条齐备，
+用户直接覆盖安装就能升级，不需要卸载。
 
 ---
 
 ## 装到手机上
 
-1. 从上面的 Release 下载 APK，传到手机安装（会提示「未知来源」，放行即可）
+1. 从上面的 Releases 页面下载 APK，传到手机安装（会提示「未知来源」，放行即可）
 2. 首次打开会停在**配置页**，填自己的看板站点地址
 3. 保存后直达看板。之后每次打开直接进站点，不再经过配置页
 
@@ -79,8 +81,8 @@ App **不写死任何站点地址** —— 实际地址由使用者首次启动�
 并把 APK 直接附到对应的 Release 上：
 
 ```bash
-git tag -a v1.0.8 -m "一句话说明"
-git push origin v1.0.8
+git tag -a vX.Y.Z -m "一句话说明"
+git push origin vX.Y.Z
 ```
 
 也可以在 Actions 页面手动触发一次 —— **手动触发只出构建产物、不上传 Release**，
@@ -119,8 +121,8 @@ python - <<'EOF'
 import zipfile, re
 z = zipfile.ZipFile('app-release.apk')
 txt = z.read('AndroidManifest.xml').decode('utf-16-le', 'ignore')
-print('版本:', sorted(set(re.findall(r'1\.0\.\d+', txt))))
-print('capacitor.config.json 字节:', len(z.read('assets/capacitor.config.json')))   # 不是 2 才对
+print('版本:', sorted(set(re.findall(r'\d+\.\d+\.\d+', txt))))
+print('capacitor.config.json 字节:', len(z.read('assets/capacitor.config.json')))   # 见下方说明
 dex = z.read('classes.dex')
 for k in [b'overscroll-behavior', b'sessionCookie']:
     print(k.decode(), '->', '命中' if k in dex else '未命中')
@@ -131,7 +133,8 @@ openssl x509 -in /tmp/c.pem -noout -fingerprint -sha256
 ```
 
 其中 **`assets/capacitor.config.json` 的字节数**最值得看：配置里有语法错误时它会静默退化成
-`{}`（3 字节），白构建一趟。正式密钥指纹形如 `1E:EE:80:62:…:AC:27`。
+`{}`（3 字节），白构建一趟。证书指纹记下来，之后判断「这个包是不是正式密钥签的」
+比对同一串即可 —— 它应当始终与本地 `mobile/workcheck.jks` 的一致。
 
 ---
 
@@ -143,7 +146,7 @@ openssl x509 -in /tmp/c.pem -noout -fingerprint -sha256
 > ⚠️ **这个文件一旦丢了就再也出不了升级包**，务必单独备份一份。
 
 CI 侧由 `KEYSTORE_B64` / `KEYSTORE_PASSWORD` / `KEY_ALIAS` / `KEY_PASSWORD`
-四个 Secrets 现场拼出这个文件 —— **已经配好，当前 Release 就是正式密钥签的。**
+四个 Secrets 现场拼出这个文件，缺一个就会退回临时密钥（下面一条）。
 
 **没配也会签名**：此时由 CI 现场生成一把临时密钥（`keytool`，有效期 30 年）并完成签名。
 这是必须的 —— 未签名的 release 包是 `app-release-unsigned.apk`，**根本装不上**
@@ -190,7 +193,8 @@ workcheck-app/
 华为 HarmonyOS 2 / 3 / 4。`compileSdkVersion` / `targetSdkVersion` 均为 35，
 在 `mobile/android/variables.gradle` 里。
 
-鸿蒙 NEXT 5 **不支持 APK**，需要另出 ArkTS + ArkWeb 的鸿蒙包 —— 尚未开始，`mobile/harmony` 目录还不存在。
+鸿蒙 NEXT 5 **不支持 APK**，需要另出一套 ArkTS + ArkWeb 的鸿蒙包。归在[待办](#待办)里，
+开始前先确认目标机型里有没有 NEXT。
 
 ---
 
@@ -222,6 +226,8 @@ WebView 本身的设置（`tuneWebView()`）：开 DomStorage（主题、折叠�
 ## 适配要点（改代码前必读）
 
 这一节是踩过的坑，每一条都有对应的真机现象。**改动前先看这里**，否则很容易改回去。
+
+> 文里的 px、毫秒之类均是实现细节，**以 `MainActivity` 为准** —— 文档只解释为什么这么定。
 
 ### 状态栏只能是「透明 + 网页顶上去」
 
@@ -324,7 +330,7 @@ App 侧已经做的两件事：
 ## 站点侧待办：App 补不了的两件事
 
 早前分支留下一份站点补丁，已存档到 `docs/web-updates.patch`。
-**核对过上游 `AidanAllen/workcheck`，这些改动一条都没合进去**：
+往站点仓库应用前先比对一次上游 —— **这些改动随时可能已经被合进去了**。
 
 | 补丁里的改动 | 影响 | App 侧能否补 |
 |---|---|---|
@@ -353,7 +359,7 @@ python scripts/gen-icons.py 原图.png --assets mobile/resources
 前景内容固定缩到画布的 80% —— 系统遮罩只保证中间 66.7% 可见，
 留这点余量是防止人物主体被圆形裁掉。
 
-> 启动图（`res/drawable*/splash.png`）不在这个脚本范围内，目前还是壳工程自带的默认图。
+> 启动图不在这个脚本范围内 —— 要换就直接覆盖 `res/drawable*/splash.png`。
 
 ---
 
@@ -406,7 +412,7 @@ python scripts/gen-icons.py 原图.png --assets mobile/resources
 | 现象 | 原因与处理 |
 |---|---|
 | 装不上，`INSTALL_PARSE_FAILED_NO_CERTIFICATES` | 包未签名 —— 只可能出现在本地 `assembleRelease` 且缺 `keystore.properties` 时 |
-| 覆盖安装失败，要求先卸载 | 签名不同（比如装过 debug 包），或 versionCode 倒退（比如装着旧的 `v2.0.1`） |
+| 覆盖安装失败，要求先卸载 | 和已装版本签名不同（比如装过 debug 包），或 versionCode 倒退（装过更高的） |
 | 状态栏是一条黑边 | `adjustMarginsForEdgeToEdge` 没保持 `disable`，或 API 29+ 没关 `setStatusBarContrastEnforced` |
 | 顶部出现**两条**空白 | 页面 `env()` 与原生注入同时生效 —— 双重避让，见「顶部避让只能做一次」 |
 | 滚动时标题和状态栏时钟叠在一起 | `.topbar` 没垫高 —— 检查 `injectPageTweaks` 的 `.topbar` 规则是否命中 |
@@ -425,5 +431,5 @@ python scripts/gen-icons.py 原图.png --assets mobile/resources
 ## 待办
 
 - 替换启动图（现为 Capacitor 默认图）
-- 鸿蒙 NEXT 包（`mobile/harmony` ArkTS 工程，取决于目标机型）—— 尚未开始
+- 鸿蒙 NEXT 包：需要另起一套 ArkTS + ArkWeb 工程，先确认目标机型里有没有 NEXT
 - 站点侧两项缺陷待按 `docs/web-updates.patch` 改进（飞书回调、SSE 重连）

@@ -1,6 +1,6 @@
 name: Android 打包
 
-# 打 tag（v2.0.1 这种）自动出包并附到 Release，也可以在 Actions 页面手动点一次。
+# 打 tag（vX.Y.Z 这种）自动出包并附到 Release，也可以在 Actions 页面手动点一次。
 # 本机不需要装 JDK / Android SDK：整个构建都在 runner 上跑完，产物直接下载。
 on:
   push:
