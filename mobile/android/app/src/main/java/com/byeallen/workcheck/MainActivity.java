@@ -332,8 +332,9 @@ public class MainActivity extends BridgeActivity {
         cm.flush();
     }
 
+    // 必须是 public：BridgeActivity 把 onPause() 放宽成了 public，子类不能收窄访问权限
     @Override
-    protected void onPause() {
+    public void onPause() {
         persistSessionCookie();
         super.onPause();
     }
